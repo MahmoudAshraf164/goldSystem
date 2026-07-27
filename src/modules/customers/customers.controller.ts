@@ -107,7 +107,7 @@ export class CustomersController {
   @ApiOperation({ summary: 'تعديل بيانات عميل (متاح للمالك والموظف)' })
   async update(
     @Param('id') id: string,
-    @Body() updateCustomerDto: UpdateUserDto,
+    @Body() updateCustomerDto: UpdateCustomerDto, // 👈 تم تغيير النوع هنا إلى UpdateCustomerDto
   ) {
     const customer = await this.customersService.update(id, updateCustomerDto);
     return {

@@ -20,6 +20,7 @@ import {
 } from '@nestjs/swagger';
 import { InventoryService } from './inventory.service';
 import { CreateInventoryDto } from './dto/create-inventory.dto';
+import { AddStockDto } from './dto/add-stock.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -47,6 +48,26 @@ export class InventoryController {
     return {
       message:
         'تم إضافة البضاعة للمخزن بنجاح واحتساب الصافي بناءً على نوع ورق الشركة وتعدادها',
+      data: item,
+    };
+  }
+
+  // 🛠️ الـ Endpoint الجديدة لتزويد كمية إضافية على عنصر موجود (Restock)
+  @Post(':id/restock')
+  @Roles(Role.OWNER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'تزويد كمية وأوزان إضافية على بضاعة موجودة بالرمز/الـ ID',
+  })
+  async restock(
+    @Param('id') id: string,
+    @Body() addStockDto: AddStockDto,
+    @Req() req: any,
+  ) {
+    const userId = req.user.id;
+    const item = await this.inventoryService.addStock(id, addStockDto, userId);
+    return {
+      message: 'تم إضافة الكمية والأوزان الجديدة إلى البضاعة بنجاح',
       data: item,
     };
   }

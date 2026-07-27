@@ -6,14 +6,21 @@ export class Customer extends Document {
   @Prop({ type: String, required: true, trim: true })
   fullName: string;
 
-  @Prop({ type: String, required: true, unique: true, index: true, trim: true })
-  phoneNumber: string; // رقم الهاتف فريد والبحث به سريع
+  // 👈 فريد للأرقام الحقيقية فقط، وتجاهل المستندات التي لا تحتوي على رقم
+  @Prop({
+    type: String,
+    required: false,
+    unique: true,
+    sparse: true,
+    trim: true,
+  })
+  phoneNumber?: string;
 
   @Prop({ type: String, required: false, trim: true })
-  nationalId?: string; // الرقم القومي (اختياري)
+  nationalId?: string;
 
-  @Prop({ type: String, required: false, trim: true }) // 👈 الحقل الساقط اللي كان مسبب المشكلة
-  address?: string; // العنوان الخاص بالعميل
+  @Prop({ type: String, required: false, trim: true })
+  address?: string;
 
   @Prop({
     type: String,
@@ -21,7 +28,7 @@ export class Customer extends Document {
     default: 'ACTIVE',
     index: true,
   })
-  status: string; // الحذف الناعم (الأرشيف)
+  status: string;
 }
 
 export const CustomerSchema = SchemaFactory.createForClass(Customer);

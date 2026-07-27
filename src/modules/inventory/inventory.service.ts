@@ -7,6 +7,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Inventory } from './schemas/inventory.schema';
 import { CreateInventoryDto } from './dto/create-inventory.dto';
+import { AddStockDto } from './dto/add-stock.dto';
 import { StockMovementsService } from '../stock-movements/stock-movements.service';
 
 @Injectable()
@@ -17,7 +18,7 @@ export class InventoryService {
     private readonly movementsService: StockMovementsService,
   ) {}
 
-  // 1. إضافة مخزون جديد بدعم مصفوفة التيكت المرنة والوزن الابتدائي الثابت
+  // 1. إضافة مخزون جديد
   async create(
     createInventoryDto: CreateInventoryDto,
     userId: string,
@@ -25,7 +26,6 @@ export class InventoryService {
     const { initialCount, totalGrossWeight, title, companyName, tagDetails } =
       createInventoryDto;
 
-    // احتساب إجمالي وزن التيكت بناءً على المصفوفة المبعوثة ديناميكياً
     let totalTagsWeight = 0;
     let totalTagsCount = 0;
 
@@ -53,9 +53,9 @@ export class InventoryService {
 
     const newInventory = new this.inventoryModel({
       ...createInventoryDto,
-      companyName: companyName && companyName.trim() !== '' ? companyName : '-', // التعامل المرن مع عدم وجود شركة
+      companyName: companyName && companyName.trim() !== '' ? companyName : '-',
       currentCount: initialCount,
-      initialGrossWeight: totalGrossWeight, // 🛠️ تثبيت الوزن الابتدائي القائم في الداتابيز للـ GET
+      initialGrossWeight: totalGrossWeight,
       totalNetWeight,
       tagDetails: tagDetails || [],
     });
@@ -75,7 +75,102 @@ export class InventoryService {
     return savedItem;
   }
 
-  // 2. تحديث المخزن وإعادة الموازنة
+  // 🛠️ 2. الدالة الجديدة: تزويد كمية/بضاعة إضافية على عنصر موجود (Restock)
+  async addStock(
+    id: string,
+    addStockDto: AddStockDto,
+    userId: string,
+  ): Promise<Inventory> {
+    const { count, grossWeight, tagDetails } = addStockDto;
+
+    const item = await this.inventoryModel
+      .findOne({ _id: id, isArchived: false })
+      .exec();
+
+    if (!item) {
+      throw new NotFoundException('البضاعة المطلوبة غير موجودة أو مؤرشفة');
+    }
+
+    // حساب إجمالي التيكت والعدد المضاف بالدفعة الجديدة
+    let addedTagsWeight = 0;
+    let addedTagsCount = 0;
+
+    if (tagDetails && tagDetails.length > 0) {
+      for (const tag of tagDetails) {
+        addedTagsWeight += tag.count * tag.weight;
+        addedTagsCount += tag.count;
+      }
+    }
+
+    if (addedTagsCount > count) {
+      throw new BadRequestException(
+        'عدد القطع المحددة بالتيكت للدفعة الجديدة يتخطى العدد المضاف!',
+      );
+    }
+
+    const addedNetWeight = parseFloat(
+      (grossWeight - addedTagsWeight).toFixed(3),
+    );
+
+    if (addedNetWeight <= 0) {
+      throw new BadRequestException(
+        'الوزن الصافي للدفعة المضافة أقل من أو يساوي صفر! مراجعة أوزان التيكت.',
+      );
+    }
+
+    // دمج مصفوفات التيكت (إذا وجد تيكت بنفس الوزن يتم زيادته، وإلا يضاف عنصر جديد)
+    const updatedTagDetails = [...item.tagDetails];
+    if (tagDetails && tagDetails.length > 0) {
+      for (const newTag of tagDetails) {
+        const existingTagIndex = updatedTagDetails.findIndex(
+          (t) => t.weight === newTag.weight,
+        );
+        if (existingTagIndex > -1) {
+          updatedTagDetails[existingTagIndex].count += newTag.count;
+        } else {
+          updatedTagDetails.push(newTag);
+        }
+      }
+    }
+
+    // الحسبات الجديدة
+    const newInitialCount = item.initialCount + count;
+    const newCurrentCount = item.currentCount + count;
+    const newInitialGrossWeight = parseFloat(
+      (item.initialGrossWeight + grossWeight).toFixed(3),
+    );
+    const newTotalGrossWeight = parseFloat(
+      (item.totalGrossWeight + grossWeight).toFixed(3),
+    );
+    const newTotalNetWeight = parseFloat(
+      (item.totalNetWeight + addedNetWeight).toFixed(3),
+    );
+
+    // تحديث قاعدة البيانات
+    item.initialCount = newInitialCount;
+    item.currentCount = newCurrentCount;
+    item.initialGrossWeight = newInitialGrossWeight;
+    item.totalGrossWeight = newTotalGrossWeight;
+    item.totalNetWeight = newTotalNetWeight;
+    item.tagDetails = updatedTagDetails;
+
+    const savedItem = await item.save();
+
+    // تسجيل حركة مخزنية للتزويد
+    await this.movementsService.logMovement({
+      inventoryItem: savedItem._id.toString(),
+      type: 'INVENTORY_IN',
+      countChange: count,
+      grossWeightChange: grossWeight,
+      netWeightChange: addedNetWeight,
+      actionBy: userId,
+      reason: `إضافة كمية إضافية (+${count} قطعة) لـ (${savedItem.title}) - وزن قائم مضاف: ${grossWeight}ج`,
+    });
+
+    return savedItem;
+  }
+
+  // 3. تحديث المخزن وإعادة الموازنة
   async update(
     id: string,
     updateInventoryDto: any,
@@ -160,7 +255,7 @@ export class InventoryService {
     return updatedItem;
   }
 
-  // 3. جلب المخزون ودعم الفلترة باسم الشركة مع إرجاع الـ initialGrossWeight
+  // 4. جلب المخزون
   async findAll(
     status: string = 'ACTIVE',
     karat?: number,
@@ -185,6 +280,7 @@ export class InventoryService {
       .exec();
   }
 
+  // 5. جلب بالتفاصيل
   async findById(id: string): Promise<Inventory> {
     const item = await this.inventoryModel
       .findOne({ _id: id, isArchived: false })
@@ -195,6 +291,7 @@ export class InventoryService {
     return item;
   }
 
+  // 6. أرشفة
   async softDelete(id: string): Promise<void> {
     const result = await this.inventoryModel
       .updateOne({ _id: id, isArchived: false }, { isArchived: true })
