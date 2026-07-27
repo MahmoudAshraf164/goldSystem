@@ -27,7 +27,7 @@ export class ScrapInvoicesService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  // 1. إصدار فاتورة بيع كسر جديدة
+  // ─── 1. إصدار فاتورة بيع كسر جديدة ───
   async createInvoice(
     dto: CreateScrapInvoiceDto,
     userId: string,
@@ -36,7 +36,7 @@ export class ScrapInvoicesService {
       customer,
       karat,
       category,
-      count = 0,
+      count,
       weight,
       goldPriceToday,
       makingChargesPerGram,
@@ -72,19 +72,17 @@ export class ScrapInvoicesService {
     }
 
     const targetItem = scrapRecord.items[itemIndex];
-
-    // 👈 الفحص يعتمد أساساً على الوزن الصافي المتاح
-    if (targetItem.weight < weight) {
+    if (targetItem.count < count || targetItem.weight < weight) {
       throw new BadRequestException(
-        `الوزن المتاح غير كافي للبيع. الوزن المتاح من ${existingCategory.name}: (${targetItem.weight} جرام)`,
+        `الرصيد غير كافي للبيع. المتاح من ${existingCategory.name}: عدد (${targetItem.count}) وزن (${targetItem.weight} جرام)`,
       );
     }
 
     // خصم الكسر من الخزنة
-    targetItem.count = Math.max(0, targetItem.count - count);
+    targetItem.count -= count;
     targetItem.weight = parseFloat((targetItem.weight - weight).toFixed(3));
 
-    if (targetItem.weight === 0) {
+    if (targetItem.count === 0 && targetItem.weight === 0) {
       scrapRecord.items.splice(itemIndex, 1);
     }
     await scrapRecord.save();
@@ -97,7 +95,6 @@ export class ScrapInvoicesService {
 
     const newInvoice = new this.scrapInvoiceModel({
       ...dto,
-      count,
       invoiceNumber,
       totalPrice: calculatedTotalPrice,
       status: 'COMPLETED',
@@ -113,7 +110,7 @@ export class ScrapInvoicesService {
       grossWeightChange: -weight,
       netWeightChange: -weight,
       actionBy: userId,
-      reason: `بيع ذهب كسر بسعر جرام ${goldPriceToday} بموجب فاتورة رقم: ${invoiceNumber}`,
+      reason: `بيع ذهب كسر بسعر جرام ${goldPriceToday} ومصنعية ${makingChargesPerGram} بموجب فاتورة رقم: ${invoiceNumber}`,
     });
 
     const populatedInvoice = await savedInvoice.populate([
@@ -126,7 +123,7 @@ export class ScrapInvoicesService {
     return populatedInvoice;
   }
 
-  // 2. تحديث وتعديل الفاتورة
+  // ─── 2. تحديث وتعديل الفاتورة (الاسترجاع الجزئي مدمج) ───
   async updateInvoice(
     id: string,
     dto: UpdateScrapInvoiceDto,
@@ -175,13 +172,14 @@ export class ScrapInvoicesService {
         throw new NotFoundException('التصنيف الجديد المحدد غير موجود أو مؤرشف');
     }
 
+    // إدارة الجرد التراكمي وإعادة حساب الكتل المرتجعة/المخصومة في الخزنة
     if (
       dto.karat !== undefined ||
       dto.category !== undefined ||
       dto.count !== undefined ||
       dto.weight !== undefined
     ) {
-      // 1. إرجاع الكميات القديمة
+      // 1. أولاً: نقوم بإرجاع الكميات القديمة بالكامل إلى مستودع الكسر لإعادة التوازن المالي
       const oldScrapRecord = await this.scrapModel
         .findOne({ karat: oldInvoice.karat })
         .exec();
@@ -194,7 +192,7 @@ export class ScrapInvoicesService {
         (item) => item.category.toString() === oldInvoice.category.toString(),
       );
       if (oldItemIndex > -1) {
-        oldScrapRecord.items[oldItemIndex].count += oldInvoice.count || 0;
+        oldScrapRecord.items[oldItemIndex].count += oldInvoice.count;
         oldScrapRecord.items[oldItemIndex].weight = parseFloat(
           (
             oldScrapRecord.items[oldItemIndex].weight + oldInvoice.weight
@@ -203,13 +201,13 @@ export class ScrapInvoicesService {
       } else {
         oldScrapRecord.items.push({
           category: oldInvoice.category,
-          count: oldInvoice.count || 0,
+          count: oldInvoice.count,
           weight: oldInvoice.weight,
         } as any);
       }
       await oldScrapRecord.save();
 
-      // 2. خصم الكميات الجديدة
+      // 2. ثانياً: نقوم بخصم المقادير الجديدة المحدثة من العيار المستهدف
       const newScrapRecord = await this.scrapModel
         .findOne({ karat: targetKarat })
         .exec();
@@ -227,27 +225,27 @@ export class ScrapInvoicesService {
         );
 
       const targetItem = newScrapRecord.items[newItemIndex];
-      if (targetItem.weight < targetWeight) {
+      if (targetItem.count < targetCount || targetItem.weight < targetWeight) {
         throw new BadRequestException(
-          `الوزن بالخزنة لا يكفي للتعديل الحالي! الوزن المتاح: (${targetItem.weight} جرام)`,
+          `الجرد بالخزنة لا يكفي للتعديل الحالي! المتاح: عدد (${targetItem.count}) وزن (${targetItem.weight} جرام)`,
         );
       }
 
-      targetItem.count = Math.max(0, targetItem.count - targetCount);
+      targetItem.count -= targetCount;
       targetItem.weight = parseFloat(
         (targetItem.weight - targetWeight).toFixed(3),
       );
 
-      if (targetItem.weight === 0) {
+      if (targetItem.count === 0 && targetItem.weight === 0) {
         newScrapRecord.items.splice(newItemIndex, 1);
       }
       await newScrapRecord.save();
 
-      // تسجيل الحركات
+      // تسجيل لوج الحركات المتبادلة
       await this.movementsService.logMovement({
         inventoryItem: oldScrapRecord._id.toString(),
         type: 'INVOICE_UPDATE_RETURN',
-        countChange: oldInvoice.count || 0,
+        countChange: oldInvoice.count,
         grossWeightChange: oldInvoice.weight,
         netWeightChange: oldInvoice.weight,
         actionBy: userId,
@@ -279,6 +277,7 @@ export class ScrapInvoicesService {
       oldInvoice.customer = new Types.ObjectId(dto.customer);
     }
 
+    // الـ totalPrice يقل/يزيد تلقائياً بناءً على تقليل أو زيادة الأوزان الجديدة المدخلة
     oldInvoice.goldPriceToday = targetPriceToday;
     oldInvoice.makingChargesPerGram = targetMakingCharges;
     oldInvoice.totalPrice = parseFloat(
@@ -292,7 +291,7 @@ export class ScrapInvoicesService {
     ]);
   }
 
-  // 3. إلغاء واستراد الفاتورة بالكامل
+  // ─── 3. إلغاء واسترجاع فاتورة الكسر بالكامل ───
   async cancelInvoice(
     id: string,
     userId: string,
@@ -309,12 +308,14 @@ export class ScrapInvoicesService {
       new Types.ObjectId(userId),
     );
 
+    // أمان الصلاحيات: الموظف يكنسل فواتيره بس، الأونر يكنسل للكل
     if (normalizedRole !== 'OWNER' && !isInvoiceCreator) {
       throw new ForbiddenException(
         'لا تملك صلاحية إلغاء فاتورة كسر لم تقم بإصدارها بنفسك',
       );
     }
 
+    // إرجاع البضاعة بالكامل لدفتر الكسر بالخزنة
     const scrapRecord = await this.scrapModel
       .findOne({ karat: invoice.karat })
       .exec();
@@ -323,32 +324,34 @@ export class ScrapInvoicesService {
         (item) => item.category.toString() === invoice.category.toString(),
       );
       if (itemIndex > -1) {
-        scrapRecord.items[itemIndex].count += invoice.count || 0;
+        scrapRecord.items[itemIndex].count += invoice.count;
         scrapRecord.items[itemIndex].weight = parseFloat(
           (scrapRecord.items[itemIndex].weight + invoice.weight).toFixed(3),
         );
       } else {
         scrapRecord.items.push({
           category: invoice.category,
-          count: invoice.count || 0,
+          count: invoice.count,
           weight: invoice.weight,
         } as any);
       }
       await scrapRecord.save();
     }
 
+    // تسجيل الحركة العكسية في الـ Movements لإعادة الشحن
     await this.movementsService.logMovement({
       inventoryItem: new Types.ObjectId(scrapRecord?._id),
       type: 'INVENTORY_IN',
-      countChange: invoice.count || 0,
+      countChange: invoice.count,
       grossWeightChange: invoice.weight,
       netWeightChange: invoice.weight,
       actionBy: userId,
-      reason: `❌ إلغاء كلي لفاتورة بيع الكسر رقم: ${invoice.invoiceNumber}`,
+      reason: `❌ إلغاء كلي لفاتورة بيع الكسر رقم: ${invoice.invoiceNumber} وإعادة السلع لجرد الخزنة`,
     });
 
+    // تحويل حالة الفاتورة لملغاة وتصفير السعر محاسبياً لمسح أثرها المالي فوراً
     invoice.status = 'CANCELLED';
-    invoice.totalPrice = 0;
+    invoice.totalPrice = 0; // تصفير القيمة داخل درج الخزنة اليومي
 
     return (await invoice.save()).populate([
       { path: 'customer', select: 'fullName phoneNumber' },
@@ -357,7 +360,7 @@ export class ScrapInvoicesService {
     ]);
   }
 
-  // 4. جلب الفواتير
+  // ─── 4. جلب الفواتير المسموحة ───
   async findAll(userId: string, userRole: string): Promise<ScrapInvoice[]> {
     const normalizedRole = userRole ? userRole.toUpperCase() : '';
     const filter: any = {};

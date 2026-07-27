@@ -1,12 +1,5 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsEnum,
-  IsMongoId,
-  IsNotEmpty,
-  IsNumber,
-  IsOptional,
-  Min,
-} from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsEnum, IsMongoId, IsNotEmpty, IsNumber, Min } from 'class-validator';
 
 export class SellScrapDto {
   @ApiProperty({ example: 21, enum: [18, 21] })
@@ -20,16 +13,12 @@ export class SellScrapDto {
   })
   @IsMongoId()
   @IsNotEmpty()
-  category: string;
+  category: string; // 👈 تحديد نوع القطعة المراد سحبها من الكسر
 
-  @ApiPropertyOptional({
-    example: 1,
-    description: 'عدد القطع المراد بيعها (اختياري)',
-  })
-  @IsOptional()
+  @ApiProperty({ example: 1, description: 'عدد القطع الكسر المراد بيعها' })
   @IsNumber()
-  @Min(0, { message: 'العدد لا يمكن أن يكون بالسالب' })
-  count?: number;
+  @Min(1, { message: 'العدد يجب أن يكون قطعة واحدة على الأقل' })
+  count: number;
 
   @ApiProperty({ example: 6.25, description: 'الوزن المراد خصمه بالجرام' })
   @IsNumber()
