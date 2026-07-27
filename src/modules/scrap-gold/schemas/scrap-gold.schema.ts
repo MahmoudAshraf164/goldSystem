@@ -4,13 +4,13 @@ import { Document, Types } from 'mongoose';
 @Schema()
 export class ScrapCategoryItem {
   @Prop({ type: Types.ObjectId, ref: 'Category', required: true })
-  category: Types.ObjectId; // الربط مع موديول التصنيفات (خواتم، غوايش، سلاسل...)
+  category: Types.ObjectId;
+
+  @Prop({ type: Number, required: false, default: 0, min: 0 })
+  count: number; // اختياري
 
   @Prop({ type: Number, required: true, default: 0, min: 0 })
-  count: number; // عدد القطع من النوع ده بالظبط في الكسر
-
-  @Prop({ type: Number, required: true, default: 0, min: 0 })
-  weight: number; // وزن القطع من النوع ده بالجرام
+  weight: number; // الوزن الإجباري والأساسي
 }
 
 @Schema({ timestamps: true })
@@ -22,10 +22,10 @@ export class ScrapGold extends Document {
     unique: true,
     index: true,
   })
-  karat: number; // العيار (18 أو 21)
+  karat: number;
 
   @Prop({ type: [ScrapCategoryItem], default: [] })
-  items: ScrapCategoryItem[]; // 👈 المصفوفة التفصيلية لكل نوع ذهب مستعمل جوه العيار
+  items: ScrapCategoryItem[];
 }
 
 export const ScrapGoldSchema = SchemaFactory.createForClass(ScrapGold);

@@ -1,5 +1,12 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsMongoId, IsNotEmpty, IsNumber, Min } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsEnum,
+  IsMongoId,
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  Min,
+} from 'class-validator';
 
 export class BuyScrapDto {
   @ApiProperty({ example: 21, enum: [18, 21] })
@@ -13,19 +20,20 @@ export class BuyScrapDto {
   })
   @IsMongoId()
   @IsNotEmpty()
-  category: string; // 👈 إلزام تحديد نوع القطعة المشتراة
+  category: string;
 
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 2,
-    description: 'عدد القطع الكسر المشتراة من هذا النوع',
+    description: 'عدد القطع الكسر المشتراة (اختياري)',
   })
+  @IsOptional()
   @IsNumber()
-  @Min(1, { message: 'العدد يجب أن يكون قطعة واحدة على الأقل' })
-  count: number;
+  @Min(0, { message: 'العدد لا يمكن أن يكون بالسالب' })
+  count?: number;
 
   @ApiProperty({
     example: 12.5,
-    description: 'الوزن الصافي بالجرام لهذه القطع',
+    description: 'الوزن الصافي بالجرام لهذه القطع (إجباري)',
   })
   @IsNumber()
   @Min(0.001, { message: 'الوزن يجب أن يكون أكبر من صفر' })

@@ -1,5 +1,12 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsMongoId, IsNotEmpty, IsNumber, Min, IsIn } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsMongoId,
+  IsNotEmpty,
+  IsNumber,
+  Min,
+  IsIn,
+  IsOptional,
+} from 'class-validator';
 
 export class CreateScrapInvoiceDto {
   @ApiProperty({
@@ -23,14 +30,18 @@ export class CreateScrapInvoiceDto {
   @IsIn([18, 21], { message: 'العيار يجب أن يكون 18 أو 21' })
   karat: number;
 
-  @ApiProperty({ example: 1, description: 'عدد القطع الكسر المبيوعة' })
+  @ApiPropertyOptional({
+    example: 1,
+    description: 'عدد القطع الكسر المبيوعة (اختياري)',
+  })
+  @IsOptional()
   @IsNumber()
-  @Min(1)
-  count: number;
+  @Min(0)
+  count?: number;
 
   @ApiProperty({
     example: 5.5,
-    description: 'الوزن الصافي بالجرام (لا يوجد ورق في الكسر)',
+    description: 'الوزن الصافي بالجرام',
   })
   @IsNumber()
   @Min(0.001)

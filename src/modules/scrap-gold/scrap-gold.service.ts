@@ -14,7 +14,7 @@ export class ScrapGoldService {
     private readonly movementsService: StockMovementsService,
   ) {}
 
-  // 1. جلب رصيد الكسر بالتفصيل مع الـ Populate
+  // 1. جلب رصيد الكسر بالتفصيل
   async getInventory(): Promise<ScrapGold[]> {
     const counts = await this.scrapModel.countDocuments();
     if (counts === 0) {
@@ -26,9 +26,9 @@ export class ScrapGoldService {
     return this.scrapModel.find().populate('items.category', 'name').exec();
   }
 
-  // 2. شراء كسر (إدخال مباشر للمخزن بدون فاتورة وبدون زبون)
+  // 2. شراء / إضافة كسر (تراكمي على نفس الـ Item الموجود)
   async buyScrap(buyScrapDto: BuyScrapDto, userId: string): Promise<ScrapGold> {
-    const { karat, category, count, weight } = buyScrapDto;
+    const { karat, category, count = 0, weight } = buyScrapDto;
 
     const existingCategory = await this.categoryModel
       .findOne({ _id: category, isArchived: false })
@@ -47,6 +47,7 @@ export class ScrapGoldService {
       (item) => item.category.toString() === category,
     );
 
+    // إذا كان التصنيف موجود مسبقاً، ندمج عليه الأوزان والأعداد تلقائياً
     if (itemIndex > -1) {
       scrapRecord.items[itemIndex].count += count;
       scrapRecord.items[itemIndex].weight = parseFloat(
@@ -62,7 +63,7 @@ export class ScrapGoldService {
 
     const updated = await scrapRecord.save();
 
-    // تسجيل حركة إدخال مخزن كسر فورية
+    // تسجيل حركة مخزنية
     await this.movementsService.logMovement({
       inventoryItem: updated._id.toString(),
       type: 'INVENTORY_IN',
@@ -70,7 +71,7 @@ export class ScrapGoldService {
       grossWeightChange: weight,
       netWeightChange: weight,
       actionBy: userId,
-      reason: `إدخال مباشر لذهب كسر عيار ${karat} - تصنيف: ${existingCategory.name}`,
+      reason: `إضافة/شراء ذهب كسر عيار ${karat} - تصنيف: ${existingCategory.name}`,
     });
 
     return updated.populate('items.category', 'name');

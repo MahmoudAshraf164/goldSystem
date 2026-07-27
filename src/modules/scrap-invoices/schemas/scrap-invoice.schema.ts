@@ -15,7 +15,7 @@ export class ScrapInvoice extends Document {
   @Prop({ type: Number, required: true, enum: [18, 21], index: true })
   karat: number;
 
-  @Prop({ type: Number, required: true, min: 1 })
+  @Prop({ type: Number, required: false, default: 0, min: 0 })
   count: number;
 
   @Prop({ type: Number, required: true, min: 0.001 })
@@ -36,7 +36,7 @@ export class ScrapInvoice extends Document {
     default: 'COMPLETED',
     index: true,
   })
-  status: string; // 👈 ضفنا حقل الحالة لإدارة الإلغاء والمرتجع الكلي
+  status: string;
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
   actionBy: Types.ObjectId;
