@@ -28,12 +28,12 @@ export class ScrapGoldController {
   @Get('balance')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'عرض رصيد الذهب الكسر الحالي (عدد ووزن) بالتفصيل (للمالك فقط)',
+    summary: 'عرض إجمالي أوزان الذهب الكسر في الخزنة لكل عيار (للمالك فقط)',
   })
   async getBalance() {
     const balance = await this.scrapGoldService.getInventory();
     return {
-      message: 'تم جلب رصيد الذهب الكسر بنجاح',
+      message: 'تم جلب رصيد أوزان الكسر بنجاح',
       data: balance,
     };
   }
@@ -41,13 +41,13 @@ export class ScrapGoldController {
   @Post('buy')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'شراء/إضافة ذهب كسر للمخزن مباشرة دون فاتورة (للمالك فقط)',
+    summary: 'إضافة وزن ذهب كسر للمخزن مباشرة دون فاتورة (للمالك فقط)',
   })
   async buyScrap(@Body() buyScrapDto: BuyScrapDto, @Req() req: any) {
     const userId = req.user.id;
     const updated = await this.scrapGoldService.buyScrap(buyScrapDto, userId);
     return {
-      message: 'تم إضافة الكسر للمخزن وتحديث سجل التحركات بنجاح',
+      message: 'تم إضافة وزن الكسر للخرنة وتحديث السجل بنجاح',
       data: updated,
     };
   }

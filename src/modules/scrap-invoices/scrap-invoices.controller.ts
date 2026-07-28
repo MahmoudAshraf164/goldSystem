@@ -20,7 +20,7 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '../../common/enums/role.enum';
 
-@ApiTags('🔴 Sales & Invoices (منظومة البيع والفواتير الجديدة)')
+@ApiTags('🔴 Sales & Invoices (منظومة البيع والفواتير - ذهب الكسر)')
 @ApiBearerAuth('access-token')
 @UseGuards(AuthGuard, RolesGuard)
 @Controller('scrap-invoices')
@@ -30,15 +30,14 @@ export class ScrapInvoicesController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary:
-      'إصدار فاتورة بيع ذهب كسر لزبون وخصمه من جرد الخزنة بحسابات الـ POS المالية (للمالك والموظف)',
+    summary: 'إصدار فاتورة بيع ذهب كسر لزبون بالوزن وخصمه من الخزنة تلقائياً',
   })
   async createInvoice(@Body() dto: CreateScrapInvoiceDto, @Req() req: any) {
     const userId = req.user.id;
     const invoice = await this.scrapInvoicesService.createInvoice(dto, userId);
     return {
       message:
-        'تم إصدار فاتورة بيع الكسر واحتساب الإجمالي تلقائياً بنجاح وتحديث جرد الخزنة والـ History',
+        'تم إصدار فاتورة بيع الكسر واحتساب الإجمالي وتحديث وزن الخزنة بنجاح',
       data: invoice,
     };
   }
@@ -47,8 +46,7 @@ export class ScrapInvoicesController {
   @HttpCode(HttpStatus.OK)
   @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
-    summary:
-      'تعديل بيانات وأصناف فاتورة بيع كسر وإعادة موازنة الخزنة تلقائياً (متاح للمالك والموظف لفواتيره والمالك للكل)',
+    summary: 'تعديل بيانات فاتورة بيع كسر وإعادة إيزان الخزنة تلقائياً',
   })
   async updateInvoice(
     @Param('id') id: string,
@@ -64,18 +62,17 @@ export class ScrapInvoicesController {
       userRole,
     );
     return {
-      message:
-        'تم تحديث فاتورة الكسر وإعادة احتساب الإجمالي وموازنة جرد الخزنة بنجاح كامل الحسابات',
+      message: 'تم تحديث فاتورة الكسر وإعادة ضبط أوزان الخزنة بنجاح',
       data: invoice,
     };
   }
 
   @Put(':id/cancel')
   @HttpCode(HttpStatus.OK)
-  @Roles(Role.OWNER, Role.Employee) // 👈 إتاحة الزر للموظف لفواتيره وللمالك لكل الفواتير
+  @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
     summary:
-      'إلغاء فاتورة بيع كسر بالكامل (إرجاع الذهب للخزنة وتصفر القيمة المالية والنقدية الداخلة للمحل)',
+      'إلغاء فاتورة بيع كسر وإعادة الوزن المباع للمخزن مع تصفير الأثر المالي',
   })
   async cancelInvoice(@Param('id') id: string, @Req() req: any) {
     const userId = req.user.id;
@@ -86,8 +83,7 @@ export class ScrapInvoicesController {
       userRole,
     );
     return {
-      message:
-        '❌ تم إلغاء فاتورة الكسر بالكامل، وإرجاع البضاعة لجرد الخزنة، وتصفير الأثر المالي بنجاح',
+      message: '❌ تم إلغاء فاتورة الكسر بالكامل، وإرجاع الوزن للخزنة بنجاح',
       data: invoice,
     };
   }
@@ -96,15 +92,14 @@ export class ScrapInvoicesController {
   @Roles(Role.OWNER, Role.Employee)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary:
-      'عرض فواتير مبيعات الذهب الكسر المسجلة (المالك يرى الكل، الموظف يرى فواتيره فقط)',
+    summary: 'عرض فواتير مبيعات الذهب الكسر',
   })
   async findAll(@Req() req: any) {
     const userId = req.user.id;
     const userRole = req.user.role;
     const invoices = await this.scrapInvoicesService.findAll(userId, userRole);
     return {
-      message: 'تم جلب سجل فواتير مبيعات الكسر المسموحة بنجاح',
+      message: 'تم جلب سجل فواتير مبيعات الكسر بنجاح',
       data: invoices,
     };
   }

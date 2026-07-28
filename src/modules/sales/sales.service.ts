@@ -7,12 +7,24 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Invoice } from './schemas/invoice.schema';
-import { CreateInvoiceDto } from './dto/create-invoice.dto';
+import {
+  CreateInvoiceDto,
+  CreateInvoiceItemDto,
+} from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { Inventory } from '../inventory/schemas/inventory.schema';
 import { Customer } from '../customers/schemas/customer.schema';
 import { StockMovementsService } from '../stock-movements/stock-movements.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+
+interface IPreparedItem {
+  itemDto: CreateInvoiceItemDto;
+  dbItem: any;
+  currentTagWeight: number;
+  soldNetWeight: number;
+  makingChargesPerGram: number;
+  itemTotalPrice: number;
+}
 
 interface IProcessedItem {
   inventoryItem: Types.ObjectId;
@@ -35,12 +47,16 @@ export class SalesService {
     private readonly eventEmitter: EventEmitter2,
   ) {}
 
-  // ─── 1. إصدار فاتورة بيع جديدة بدعم استقبال الـ tagWeight الديناميكي من الفرونت إند ───
+  // ─── 1. إصدار فاتورة بيع جديدة ───
   async createSale(
     createInvoiceDto: CreateInvoiceDto,
     userId: string,
   ): Promise<Invoice> {
-    const { customer, items } = createInvoiceDto;
+    const {
+      customer,
+      items,
+      totalPrice: overrideTotalPrice,
+    } = createInvoiceDto;
 
     const existingCustomer = await this.customerModel
       .findOne({ _id: customer, status: 'ACTIVE' })
@@ -50,13 +66,12 @@ export class SalesService {
     if (!items || items.length === 0)
       throw new BadRequestException('لا يمكن إصدار فاتورة فارغة بدون قطع');
 
-    const processedItems: IProcessedItem[] = [];
-    let totalInvoiceGrossWeight = 0;
-    let totalInvoiceNetWeight = 0;
-    let totalInvoicePrice = 0;
-
     const timestamp = Date.now().toString().slice(-6);
     const invoiceNumber = `GMS-${new Date().getFullYear()}-${timestamp}`;
+
+    // 1️⃣ المرحلة الأولى: الفحص المبدئي وحساب الأوزان الصافية
+    const preparedItems: IPreparedItem[] = [];
+    let calculatedSumTotalPrice = 0;
 
     for (const itemDto of items) {
       const dbItem: any = await this.inventoryModel
@@ -73,15 +88,13 @@ export class SalesService {
           `عذراً، نفدت الكمية من البضاعة: ${dbItem.title}`,
         );
 
-      // 🛠️ الخطوة السحرية: اعتماد الوزن المبعوث من الواجهة، ولو مبعوتش ياخد أول وزن متاح بالمخزن
       let currentTagWeight = 0.06;
-      if (itemDto.tagWeight !== undefined) {
+      if (itemDto.tagWeight !== undefined && itemDto.tagWeight !== null) {
         currentTagWeight = itemDto.tagWeight;
       } else if (dbItem.tagDetails && dbItem.tagDetails.length > 0) {
         currentTagWeight = dbItem.tagDetails[0].weight;
       }
 
-      // حسبة الصافي الدقيقة بناءً على الـ tagWeight الفعلي المستلم
       const soldNetWeight = itemDto.hasTag
         ? parseFloat((itemDto.soldGrossWeight - currentTagWeight).toFixed(3))
         : itemDto.soldGrossWeight;
@@ -95,39 +108,94 @@ export class SalesService {
         );
       }
 
-      const itemTotalPrice = parseFloat(
+      let itemTotalPrice = parseFloat(
         (
           soldNetWeight *
           (itemDto.goldPriceToday + itemDto.makingChargesPerGram)
         ).toFixed(2),
       );
 
+      let finalMakingChargesPerGram = itemDto.makingChargesPerGram;
+
+      if (
+        itemDto.itemTotalPrice !== undefined &&
+        itemDto.itemTotalPrice !== null
+      ) {
+        itemTotalPrice = parseFloat(itemDto.itemTotalPrice.toFixed(2));
+        const calculatedMaking =
+          itemTotalPrice / soldNetWeight - itemDto.goldPriceToday;
+        if (calculatedMaking < 0) {
+          throw new BadRequestException(
+            `السعر المحدد للقطعة ${dbItem.title} أقل من قيمة الذهب الخام الصافي!`,
+          );
+        }
+        finalMakingChargesPerGram = parseFloat(calculatedMaking.toFixed(2));
+      }
+
+      calculatedSumTotalPrice += itemTotalPrice;
+
+      preparedItems.push({
+        itemDto,
+        dbItem,
+        currentTagWeight,
+        soldNetWeight,
+        makingChargesPerGram: finalMakingChargesPerGram,
+        itemTotalPrice,
+      });
+    }
+
+    // 2️⃣ المرحلة الثانية: إعادة تسوية المصنعية لو تم إرسال totalPrice إجمالي
+    const hasGlobalOverride =
+      overrideTotalPrice !== undefined && overrideTotalPrice !== null;
+    const finalInvoiceTotalPrice = hasGlobalOverride
+      ? parseFloat((overrideTotalPrice as number).toFixed(2))
+      : parseFloat(calculatedSumTotalPrice.toFixed(2));
+
+    const processedItems: IProcessedItem[] = [];
+    let totalInvoiceGrossWeight = 0;
+    let totalInvoiceNetWeight = 0;
+
+    for (const prep of preparedItems) {
+      const { itemDto, dbItem, currentTagWeight, soldNetWeight } = prep;
+      let { makingChargesPerGram, itemTotalPrice } = prep;
+
+      if (hasGlobalOverride && calculatedSumTotalPrice > 0) {
+        const ratio = finalInvoiceTotalPrice / calculatedSumTotalPrice;
+        itemTotalPrice = parseFloat((itemTotalPrice * ratio).toFixed(2));
+
+        const calculatedMaking =
+          itemTotalPrice / soldNetWeight - itemDto.goldPriceToday;
+        if (calculatedMaking < 0) {
+          throw new BadRequestException(
+            `الإجمالي الكلي للفاتورة ينتج عنه مصنعية بالسالب للقطعة: ${dbItem.title}`,
+          );
+        }
+        makingChargesPerGram = parseFloat(calculatedMaking.toFixed(2));
+      }
+
+      // خصم الكميات والأوزان من المخزن
       const newCurrentCount = dbItem.currentCount - 1;
       const newTotalGrossWeight = parseFloat(
         (dbItem.totalGrossWeight - itemDto.soldGrossWeight).toFixed(3),
       );
 
-      // 🛠️ تحديث مصفوفة التيكت: البحث عن الـ weight المطابق للوزن المبعوث وخصم قطعة منه
       const updatedTagDetails = [...(dbItem.tagDetails || [])];
       if (itemDto.hasTag && updatedTagDetails.length > 0) {
         const matchedTagIndex = updatedTagDetails.findIndex(
-          (tag) => tag.weight === currentTagWeight,
+          (tag: any) => tag.weight === currentTagWeight,
         );
 
         if (matchedTagIndex > -1) {
           updatedTagDetails[matchedTagIndex].count -= 1;
-          // لو تعداد الوزن المختار ده خلص، بنشيله من قائمة أوزان المستودع
           if (updatedTagDetails[matchedTagIndex].count <= 0) {
             updatedTagDetails.splice(matchedTagIndex, 1);
           }
         } else {
-          // حالة احتياطية لو الفرونت إند بعت وزن مش متسجل في شحنة المخزن
           updatedTagDetails[0].count -= 1;
           if (updatedTagDetails[0].count <= 0) updatedTagDetails.shift();
         }
       }
 
-      // إعادة حساب صافي وزن المستودع الكلي بناءً على ما تبقى في المصفوفة
       let remainingTagsWeight = 0;
       for (const tag of updatedTagDetails) {
         remainingTagsWeight += tag.count * tag.weight;
@@ -155,7 +223,7 @@ export class SalesService {
         grossWeightChange: -itemDto.soldGrossWeight,
         netWeightChange: -soldNetWeight,
         actionBy: userId,
-        reason: `بيع قطعة بتيكت وزن (${currentTagWeight}ج) - شركة (${dbItem.companyName || '-'}) - فاتورة رقم: ${invoiceNumber}`,
+        reason: `بيع قطعة بتيكت وزن (${currentTagWeight}ج) - مصنعية الجرام الصافي (${makingChargesPerGram}) - فاتورة رقم: ${invoiceNumber}`,
       });
 
       processedItems.push({
@@ -164,13 +232,12 @@ export class SalesService {
         soldNetWeight,
         hasTag: itemDto.hasTag,
         goldPriceToday: itemDto.goldPriceToday,
-        makingChargesPerGram: itemDto.makingChargesPerGram,
+        makingChargesPerGram,
         itemTotalPrice,
       });
 
       totalInvoiceGrossWeight += itemDto.soldGrossWeight;
       totalInvoiceNetWeight += soldNetWeight;
-      totalInvoicePrice += itemTotalPrice;
     }
 
     const newInvoice = new this.invoiceModel({
@@ -180,7 +247,7 @@ export class SalesService {
       soldBy: new Types.ObjectId(userId),
       totalInvoiceGrossWeight: parseFloat(totalInvoiceGrossWeight.toFixed(3)),
       totalInvoiceNetWeight: parseFloat(totalInvoiceNetWeight.toFixed(3)),
-      totalPrice: parseFloat(totalInvoicePrice.toFixed(2)),
+      totalPrice: finalInvoiceTotalPrice,
     });
 
     const savedInvoice = await newInvoice.save();
@@ -191,7 +258,7 @@ export class SalesService {
     ]);
   }
 
-  // ─── 2. تعديل الفاتورة الذكي ودعم ميزة الاسترجاع الجزئي والأوزان المصفوفية ───
+  // ─── 2. تعديل الفاتورة ───
   async updateInvoice(
     id: string,
     updateInvoiceDto: UpdateInvoiceDto,
@@ -220,8 +287,8 @@ export class SalesService {
       oldInvoice.customer = new Types.ObjectId(updateInvoiceDto.customer);
     }
 
-    if (updateInvoiceDto.items) {
-      // أ- مرحلة إعادة الأرصدة القديمة للجرد بشكل موازن ومصفوقي
+    if (updateInvoiceDto.items && updateInvoiceDto.items.length > 0) {
+      // أ- إعادة الأرصدة القديمة
       for (const oldItem of oldInvoice.items) {
         const dbItem: any = await this.inventoryModel
           .findById(oldItem.inventoryItem)
@@ -240,7 +307,7 @@ export class SalesService {
           const updatedTagDetails = [...(dbItem.tagDetails || [])];
           if (oldItem.hasTag) {
             const matchedIndex = updatedTagDetails.findIndex(
-              (tag) => tag.weight === currentTagWeight,
+              (tag: any) => tag.weight === currentTagWeight,
             );
             if (matchedIndex > -1) {
               updatedTagDetails[matchedIndex].count += 1;
@@ -270,7 +337,7 @@ export class SalesService {
           );
 
           const isTotallyReturned = !updateInvoiceDto.items.some(
-            (newItem) =>
+            (newItem: any) =>
               newItem.inventoryItem === oldItem.inventoryItem.toString(),
           );
 
@@ -288,13 +355,11 @@ export class SalesService {
         }
       }
 
-      // ب- إعادة الخصم بناءً على المصفوفة المحدثة والـ tagWeight المستلم
-      const processedItems: any[] = [];
-      let totalInvoiceGrossWeight = 0;
-      let totalInvoiceNetWeight = 0;
-      let totalInvoicePrice = 0;
+      // ب- تجهيز المعاملات الجديدة
+      const preparedItems: IPreparedItem[] = [];
+      let calculatedSumTotalPrice = 0;
 
-      for (const newItemDto of updateInvoiceDto.items as any[]) {
+      for (const newItemDto of updateInvoiceDto.items as CreateInvoiceItemDto[]) {
         const dbItem: any = await this.inventoryModel
           .findOne({ _id: newItemDto.inventoryItem, isArchived: false })
           .exec();
@@ -302,7 +367,10 @@ export class SalesService {
           throw new NotFoundException('البضاعة المطلوبة غير موجودة في المخزن');
 
         let currentTagWeight = 0.06;
-        if (newItemDto.tagWeight !== undefined) {
+        if (
+          newItemDto.tagWeight !== undefined &&
+          newItemDto.tagWeight !== null
+        ) {
           currentTagWeight = newItemDto.tagWeight;
         } else if (dbItem.tagDetails && dbItem.tagDetails.length > 0) {
           currentTagWeight = dbItem.tagDetails[0].weight;
@@ -323,12 +391,75 @@ export class SalesService {
           );
         }
 
-        const itemTotalPrice = parseFloat(
+        let itemTotalPrice = parseFloat(
           (
             soldNetWeight *
             (newItemDto.goldPriceToday + newItemDto.makingChargesPerGram)
           ).toFixed(2),
         );
+
+        let finalMakingChargesPerGram = newItemDto.makingChargesPerGram;
+
+        if (
+          newItemDto.itemTotalPrice !== undefined &&
+          newItemDto.itemTotalPrice !== null
+        ) {
+          itemTotalPrice = parseFloat(newItemDto.itemTotalPrice.toFixed(2));
+          const calculatedMaking =
+            itemTotalPrice / soldNetWeight - newItemDto.goldPriceToday;
+          if (calculatedMaking < 0) {
+            throw new BadRequestException(
+              `السعر الجديد للقطعة ${dbItem.title} أقل من الذهب الخام الصافي!`,
+            );
+          }
+          finalMakingChargesPerGram = parseFloat(calculatedMaking.toFixed(2));
+        }
+
+        calculatedSumTotalPrice += itemTotalPrice;
+
+        preparedItems.push({
+          itemDto: newItemDto,
+          dbItem,
+          currentTagWeight,
+          soldNetWeight,
+          makingChargesPerGram: finalMakingChargesPerGram,
+          itemTotalPrice,
+        });
+      }
+
+      const hasGlobalOverride =
+        updateInvoiceDto.totalPrice !== undefined &&
+        updateInvoiceDto.totalPrice !== null;
+      const finalInvoiceTotalPrice = hasGlobalOverride
+        ? parseFloat((updateInvoiceDto.totalPrice as number).toFixed(2))
+        : parseFloat(calculatedSumTotalPrice.toFixed(2));
+
+      const processedItems: IProcessedItem[] = [];
+      let totalInvoiceGrossWeight = 0;
+      let totalInvoiceNetWeight = 0;
+
+      for (const prep of preparedItems) {
+        const {
+          itemDto: newItemDto,
+          dbItem,
+          currentTagWeight,
+          soldNetWeight,
+        } = prep;
+        let { makingChargesPerGram, itemTotalPrice } = prep;
+
+        if (hasGlobalOverride && calculatedSumTotalPrice > 0) {
+          const ratio = finalInvoiceTotalPrice / calculatedSumTotalPrice;
+          itemTotalPrice = parseFloat((itemTotalPrice * ratio).toFixed(2));
+
+          const calculatedMaking =
+            itemTotalPrice / soldNetWeight - newItemDto.goldPriceToday;
+          if (calculatedMaking < 0) {
+            throw new BadRequestException(
+              `الإجمالي المعدل ينتج عنه مصنعية بالسالب للقطعة: ${dbItem.title}`,
+            );
+          }
+          makingChargesPerGram = parseFloat(calculatedMaking.toFixed(2));
+        }
 
         const newCurrentCount = dbItem.currentCount - 1;
         const newTotalGrossWeight = parseFloat(
@@ -338,7 +469,7 @@ export class SalesService {
         const updatedTagDetails = [...(dbItem.tagDetails || [])];
         if (newItemDto.hasTag && updatedTagDetails.length > 0) {
           const matchedTagIndex = updatedTagDetails.findIndex(
-            (tag) => tag.weight === currentTagWeight,
+            (tag: any) => tag.weight === currentTagWeight,
           );
           if (matchedTagIndex > -1) {
             updatedTagDetails[matchedTagIndex].count -= 1;
@@ -376,13 +507,12 @@ export class SalesService {
           soldNetWeight,
           hasTag: newItemDto.hasTag,
           goldPriceToday: newItemDto.goldPriceToday,
-          makingChargesPerGram: newItemDto.makingChargesPerGram,
+          makingChargesPerGram,
           itemTotalPrice,
         });
 
         totalInvoiceGrossWeight += newItemDto.soldGrossWeight;
         totalInvoiceNetWeight += soldNetWeight;
-        totalInvoicePrice += itemTotalPrice;
       }
 
       oldInvoice.items = processedItems as any;
@@ -392,7 +522,7 @@ export class SalesService {
       oldInvoice.totalInvoiceNetWeight = parseFloat(
         totalInvoiceNetWeight.toFixed(3),
       );
-      oldInvoice.totalPrice = parseFloat(totalInvoicePrice.toFixed(2));
+      oldInvoice.totalPrice = finalInvoiceTotalPrice;
     }
 
     return (await oldInvoice.save()).populate([
@@ -402,7 +532,7 @@ export class SalesService {
     ]);
   }
 
-  // ─── 3. إلغاء كلي للفاتورة بالكامل ───
+  // ─── 3. إلغاء الفاتورة ───
   async cancelInvoice(id: string, userId: string): Promise<Invoice> {
     const invoice = await this.invoiceModel.findById(id).exec();
     if (!invoice) throw new NotFoundException('الفاتورة غير موجودة');
@@ -427,7 +557,7 @@ export class SalesService {
         const updatedTagDetails = [...(dbItem.tagDetails || [])];
         if (item.hasTag) {
           const matchedIndex = updatedTagDetails.findIndex(
-            (tag) => tag.weight === currentTagWeight,
+            (tag: any) => tag.weight === currentTagWeight,
           );
           if (matchedIndex > -1) {
             updatedTagDetails[matchedIndex].count += 1;
@@ -466,7 +596,7 @@ export class SalesService {
     return await invoice.save();
   }
 
-  // ─── 4. جلب سجل الفواتير الشامل ───
+  // ─── 4. جلب سجل الفواتير ───
   async findAllInvoices(
     query: { status?: string; invoiceNumber?: string },
     userId: string,

@@ -9,14 +9,8 @@ export class ScrapInvoice extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Customer', required: true, index: true })
   customer: Types.ObjectId;
 
-  @Prop({ type: Types.ObjectId, ref: 'Category', required: true })
-  category: Types.ObjectId;
-
   @Prop({ type: Number, required: true, enum: [18, 21], index: true })
   karat: number;
-
-  @Prop({ type: Number, required: true, min: 1 })
-  count: number;
 
   @Prop({ type: Number, required: true, min: 0.001 })
   weight: number;
@@ -36,7 +30,7 @@ export class ScrapInvoice extends Document {
     default: 'COMPLETED',
     index: true,
   })
-  status: string; // 👈 ضفنا حقل الحالة لإدارة الإلغاء والمرتجع الكلي
+  status: string;
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true, index: true })
   actionBy: Types.ObjectId;

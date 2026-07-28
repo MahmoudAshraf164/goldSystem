@@ -11,10 +11,6 @@ import {
   ScrapGold,
   ScrapGoldSchema,
 } from '../scrap-gold/schemas/scrap-gold.schema';
-import {
-  Category,
-  CategorySchema,
-} from '../categories/schemas/category.schema'; // 👈 تأكد من استيرادها هنا
 import { StockMovementsModule } from '../stock-movements/stock-movements.module';
 
 @Module({
@@ -23,7 +19,6 @@ import { StockMovementsModule } from '../stock-movements/stock-movements.module'
       { name: ScrapInvoice.name, schema: ScrapInvoiceSchema },
       { name: Customer.name, schema: CustomerSchema },
       { name: ScrapGold.name, schema: ScrapGoldSchema },
-      { name: Category.name, schema: CategorySchema }, // 👈 إجبارية هنا عشان الـ Service يستعلم عنها!
     ]),
     StockMovementsModule,
   ],

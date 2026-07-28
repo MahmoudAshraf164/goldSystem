@@ -37,7 +37,6 @@ export class CreateInvoiceItemDto {
   @IsNotEmpty()
   hasTag: boolean;
 
-  // 🛠️ الحقل الجديد لاستقبال وزن التيكت الفعلي المختار من الواجهة
   @ApiPropertyOptional({
     example: 0.04,
     description:
@@ -59,6 +58,16 @@ export class CreateInvoiceItemDto {
   @IsNumber()
   @Min(0)
   makingChargesPerGram: number;
+
+  @ApiPropertyOptional({
+    example: 5000,
+    description:
+      'إجمالي سعر هذه القطعة النهائي بعد الخصم/الفصال (اختياري - يعيد حساب المصنعية على الصافي)',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  itemTotalPrice?: number; // 👈 إجمالي القطعة الفردية اختياري
 }
 
 export class CreateInvoiceDto {
@@ -78,4 +87,14 @@ export class CreateInvoiceDto {
   @ValidateNested({ each: true })
   @Type(() => CreateInvoiceItemDto)
   items: CreateInvoiceItemDto[];
+
+  @ApiPropertyOptional({
+    example: 50000,
+    description:
+      'إجمالي سعر الفاتورة بالكامل بعد الخصم (اختياري - يوزع الخصم على مصنعية القطع نسبياً)',
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  totalPrice?: number; // 👈 إجمالي الفاتورة الكلي اختياري
 }
