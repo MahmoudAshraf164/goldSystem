@@ -21,7 +21,7 @@ export class StockMovementsService {
       | 'BULLION_IN'
       | 'BULLION_SALE_OUT'
       | 'BULLION_CANCEL_RETURN'
-      | 'BULLION_UPDATE_RETURN'; // 👈 تم إضافة أنواع السبايك والجنيهات هنا
+      | 'BULLION_UPDATE_RETURN'; 
     countChange: number;
     grossWeightChange: number;
     netWeightChange: number;
