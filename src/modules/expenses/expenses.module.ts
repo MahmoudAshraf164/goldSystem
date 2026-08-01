@@ -10,6 +10,6 @@ import { Expense, ExpenseSchema } from './schemas/expense.schema';
   ],
   controllers: [ExpensesController],
   providers: [ExpensesService],
-  exports: [MongooseModule], // 👈 مهم جداً نعمل export عشان الـ PurchasesLedger يقدر يشوف الـ Schema دي
+  exports: [MongooseModule, ExpensesService],
 })
 export class ExpensesModule {}

@@ -18,7 +18,7 @@ export class ProfitLedgerService {
   async getAdvancedProfitReport(query: LedgerQueryDto) {
     const { start, end } = this.calculateDateRange(query);
 
-    // ─── 1. حساب النقدية الداخلة للمحل (Inflows) ───
+    // 1. النقدية الداخلة (Inflows)
     const newGoldCashData = await this.invoiceModel.aggregate([
       {
         $match: { createdAt: { $gte: start, $lte: end }, status: 'COMPLETED' },
@@ -42,12 +42,11 @@ export class ProfitLedgerService {
     ]);
     const scrapSalesCash = scrapSalesData[0]?.totalSalesCash || 0;
 
-    // إجمالي الكاش الداخل (جديد + كسر)
     const totalCashInflow = parseFloat(
       (newGoldCash + scrapSalesCash).toFixed(2),
     );
 
-    // ─── 2. حساب النقدية الخارجة بالكامل من الدرج (Outflows) ───
+    // 2. النقدية الخارجة والمصاريف (Outflows)
     const operatingExpensesData = await this.expenseModel.aggregate([
       {
         $match: {
@@ -78,18 +77,16 @@ export class ProfitLedgerService {
     ]);
     const scrapGoldPurchasesCost = scrapPurchasesData[0]?.totalCostCash || 0;
 
-    // إجمالي الكاش الخارج
     const totalCashOutflow = parseFloat(
       (totalOperatingExpenses + scrapGoldPurchasesCost).toFixed(2),
     );
 
-    // ─── 3. صافي كاش الدرج المتبقي (قفل الخزنة الفعلي) ───
+    // 3. صافي نقدية الدرج المتبقية
     const netCashInDrawer = parseFloat(
       (totalCashInflow - totalCashOutflow).toFixed(2),
     );
 
-    // ─── 4. 🛠️ التفنيط التحليلي لأرباح المصنعيات (جديد + كسر) ───
-    // أ- أرباح مصنعيات الذهب الجديد
+    // 4. أرباح المصنعيات
     const newGoldProfitData = await this.invoiceModel.aggregate([
       {
         $match: { createdAt: { $gte: start, $lte: end }, status: 'COMPLETED' },
@@ -112,7 +109,6 @@ export class ProfitLedgerService {
     const newGoldMakingProfit =
       newGoldProfitData[0]?.totalMakingChargesProfit || 0;
 
-    // ب- 🛠️ حساب أرباح مصنعيات الذهب الكسر (الوزن × مصنعية الكسر المدخلة بالفاتورة)
     const scrapGoldProfitData = await this.scrapInvoiceModel.aggregate([
       {
         $match: {
@@ -128,7 +124,7 @@ export class ProfitLedgerService {
         $group: {
           _id: null,
           totalScrapMakingProfit: {
-            $sum: { $multiply: ['$weight', '$makingChargesPerGram'] }, // 👈 ضرب الوزن في مصنعية الكسر
+            $sum: { $multiply: ['$weight', '$makingChargesPerGram'] },
           },
         },
       },
@@ -136,7 +132,6 @@ export class ProfitLedgerService {
     const scrapGoldMakingProfit =
       scrapGoldProfitData[0]?.totalScrapMakingProfit || 0;
 
-    // ج- إجمالي أرباح المصنعيات الكلية للمحل (جديد + كسر)
     const totalCombinedMakingProfit = parseFloat(
       (newGoldMakingProfit + scrapGoldMakingProfit).toFixed(2),
     );
@@ -158,13 +153,13 @@ export class ProfitLedgerService {
         goldPurchasesCash: scrapGoldPurchasesCost,
         otherExpensesCash: others,
       },
-      finalNetProfit: netCashInDrawer, // صافي الكاش الفعلي بالدرج
+      finalNetProfit: netCashInDrawer,
       advancedAnalyticalBreakdown: {
-        newGoldMakingChargesProfit: parseFloat(newGoldMakingProfit.toFixed(2)), // ربح مصنعية الجديد لوحده
+        newGoldMakingChargesProfit: parseFloat(newGoldMakingProfit.toFixed(2)),
         scrapGoldMakingChargesProfit: parseFloat(
           scrapGoldMakingProfit.toFixed(2),
-        ), // 👈 ربح مصنعية الكسر لوحده
-        totalCombinedMakingProfit, // إجمالي أرباح المصنعيات للاثنين
+        ),
+        totalCombinedMakingProfit,
         performanceIndicator: healthIndicator,
       },
     };

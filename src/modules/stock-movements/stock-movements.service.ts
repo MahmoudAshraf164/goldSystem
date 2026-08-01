@@ -12,12 +12,16 @@ export class StockMovementsService {
 
   // دالة داخلية الباكيند بيستدعيها لتسجيل الحركة فوراً
   async logMovement(data: {
-    inventoryItem: string | Types.ObjectId; // 👈 التعديل هنا: يقبل النوعين لمنع خطأ الـ TypeScript
+    inventoryItem: string | Types.ObjectId;
     type:
       | 'INVENTORY_IN'
       | 'SALE_OUT'
       | 'INVOICE_UPDATE_RETURN'
-      | 'INVOICE_UPDATE_OUT';
+      | 'INVOICE_UPDATE_OUT'
+      | 'BULLION_IN'
+      | 'BULLION_SALE_OUT'
+      | 'BULLION_CANCEL_RETURN'
+      | 'BULLION_UPDATE_RETURN'; // 👈 تم إضافة أنواع السبايك والجنيهات هنا
     countChange: number;
     grossWeightChange: number;
     netWeightChange: number;
@@ -36,28 +40,24 @@ export class StockMovementsService {
     return newLog.save();
   }
 
-  // جلب سجل التحركات للمالك لمراقبة الجرد
-  // جلب سجل التحركات للمالك مع تفنيط ديناميكي للجديد والكسر
+  // جلب سجل التحركات للمالك مع تفنيط ديناميكي للجديد والكسر والسبايك
   async getMovements(inventoryItemId?: string): Promise<StockMovement[]> {
     const filter: any = {};
     if (inventoryItemId) {
       filter.inventoryItem = new Types.ObjectId(inventoryItemId);
     }
 
-    // 1. جلب الحركات الأساسية من الداتا بيز مع عمل populate للمسؤول عن الحركة
     const movements = await this.movementModel
       .find(filter)
       .populate('actionBy', 'fullName role')
-      .sort({ createdAt: -1 }) // من الأحدث للأقدم دائماً
+      .sort({ createdAt: -1 })
       .exec();
 
-    // 2. عمل جلب ديناميكي لبيانات القطعة/الخزنة في الـ Memory لمنع الـ null والخطأ البرمجي
     const populatedMovements = await Promise.all(
       movements.map(async (movement) => {
-        // تحويل المستند لـ Object عادي مع تعيين النوع كـ any لمنع خطأ الـ TypeScript الظاهر في الصورة
         const movementObj: any = movement.toObject();
 
-        // أ- محاولة البحث أولاً في كولكشن الذهب الجديد (Inventory)
+        // أ- البحث في كولكشن الذهب الجديد
         const newGoldItem = await this.movementModel.db
           .model('Inventory')
           .findById(movementObj.inventoryItem)
@@ -65,30 +65,43 @@ export class StockMovementsService {
           .exec();
 
         if (newGoldItem) {
-          // لو لقاها بضاعة جديدة، يربط الـ Object الخاص بها مباشرة
           movementObj.inventoryItem = newGoldItem;
         } else {
-          // ب- لو ملهاش وجود في الجديد، يبقى ذهب كسر، نروح ندور في كولكشن الـ ScrapGold بقيمة الـ ID
-          const scrapGoldItem = await this.movementModel.db
-            .model('ScrapGold')
+          // ب- البحث في كولكشن السبايك والجنيهات
+          const bullionItem = await this.movementModel.db
+            .model('BullionInventory')
             .findById(movementObj.inventoryItem)
-            .select('karat')
+            .select('title karat companyName')
             .exec();
 
-          if (scrapGoldItem) {
-            // صياغة Object متوافق مع نفس هيكل الفرونت إند بدون أي اعتراض من الـ Compiler
+          if (bullionItem) {
             movementObj.inventoryItem = {
-              _id: scrapGoldItem._id,
-              title: `ذهب كسر عيار ${scrapGoldItem.karat}`,
-              karat: scrapGoldItem.karat,
+              _id: bullionItem._id,
+              title: `${bullionItem.title} - ${bullionItem.companyName}`,
+              karat: bullionItem.karat,
             };
           } else {
-            // ج- حماية إضافية في حال كان الصنف ممسوح نهائياً من السيستم أو من حركات قديمة
-            movementObj.inventoryItem = {
-              _id: movementObj.inventoryItem,
-              title: 'صنف من فاتورة معدلة / كسر قديم',
-              karat: null,
-            };
+            // ج- البحث في كولكشن الذهب الكسر
+            const scrapGoldItem = await this.movementModel.db
+              .model('ScrapGold')
+              .findById(movementObj.inventoryItem)
+              .select('karat')
+              .exec();
+
+            if (scrapGoldItem) {
+              movementObj.inventoryItem = {
+                _id: scrapGoldItem._id,
+                title: `ذهب كسر عيار ${scrapGoldItem.karat}`,
+                karat: scrapGoldItem.karat,
+              };
+            } else {
+              // د- حماية إضافية للقيم المحذوفة أو المعدلة
+              movementObj.inventoryItem = {
+                _id: movementObj.inventoryItem,
+                title: 'صنف من فاتورة معدلة / صنف قديم',
+                karat: null,
+              };
+            }
           }
         }
 

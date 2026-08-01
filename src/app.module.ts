@@ -20,6 +20,9 @@ import { PurchasesLedgerModule } from './modules/purchases-ledger/purchases-ledg
 import { ExpensesModule } from './modules/expenses/expenses.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { ProfitLedgerModule } from './modules/profit-ledger/profit-ledger.module';
+import { BullionInventoryModule } from './modules/bullion-inventory/bullion-inventory.module';
+import { BullionSalesModule } from './modules/bullion-sales/bullion-sales.module';
+import { BullionPurchasesModule } from './modules/bullion-purchases/bullion-purchases.module';
 
 @Module({
   imports: [
@@ -68,6 +71,9 @@ import { ProfitLedgerModule } from './modules/profit-ledger/profit-ledger.module
     PurchasesLedgerModule,
     NotificationsModule,
     ProfitLedgerModule,
+    BullionInventoryModule,
+    BullionSalesModule,
+    BullionPurchasesModule,
   ],
   controllers: [AppController],
 })

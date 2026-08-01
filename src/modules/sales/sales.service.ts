@@ -69,19 +69,30 @@ export class SalesService {
     const timestamp = Date.now().toString().slice(-6);
     const invoiceNumber = `GMS-${new Date().getFullYear()}-${timestamp}`;
 
+    // خريطة لتتبع حالة المخزون في الذاكرة لتجنب تكرار الخصم الخطأ عند تكرار نفس الصنف
+    const inventoryMap = new Map<string, any>();
+
+    const getInventoryItem = async (inventoryId: string) => {
+      if (!inventoryMap.has(inventoryId)) {
+        const dbItem = await this.inventoryModel
+          .findOne({ _id: inventoryId, isArchived: false })
+          .exec();
+        if (!dbItem) {
+          throw new NotFoundException(
+            `البضاعة بالـ ID: ${inventoryId} غير موجودة`,
+          );
+        }
+        inventoryMap.set(inventoryId, dbItem.toObject());
+      }
+      return inventoryMap.get(inventoryId);
+    };
+
     // 1️⃣ المرحلة الأولى: الفحص المبدئي وحساب الأوزان الصافية
     const preparedItems: IPreparedItem[] = [];
     let calculatedSumTotalPrice = 0;
 
     for (const itemDto of items) {
-      const dbItem: any = await this.inventoryModel
-        .findOne({ _id: itemDto.inventoryItem, isArchived: false })
-        .exec();
-
-      if (!dbItem)
-        throw new NotFoundException(
-          `البضاعة بالـ ID: ${itemDto.inventoryItem} غير موجودة`,
-        );
+      const dbItem = await getInventoryItem(itemDto.inventoryItem);
 
       if (dbItem.currentCount < 1)
         throw new BadRequestException(
@@ -134,6 +145,12 @@ export class SalesService {
 
       calculatedSumTotalPrice += itemTotalPrice;
 
+      // تحديث نسبي مؤقت في الذاكرة لفحوصات التكرار
+      dbItem.currentCount -= 1;
+      dbItem.totalGrossWeight = parseFloat(
+        (dbItem.totalGrossWeight - itemDto.soldGrossWeight).toFixed(3),
+      );
+
       preparedItems.push({
         itemDto,
         dbItem,
@@ -144,7 +161,9 @@ export class SalesService {
       });
     }
 
-    // 2️⃣ المرحلة الثانية: إعادة تسوية المصنعية لو تم إرسال totalPrice إجمالي
+    inventoryMap.clear();
+
+    // 2️⃣ المرحلة الثانية: إعادة تسوية المصنعية وتحديث المخزن رسمياً
     const hasGlobalOverride =
       overrideTotalPrice !== undefined && overrideTotalPrice !== null;
     const finalInvoiceTotalPrice = hasGlobalOverride
@@ -156,8 +175,12 @@ export class SalesService {
     let totalInvoiceNetWeight = 0;
 
     for (const prep of preparedItems) {
-      const { itemDto, dbItem, currentTagWeight, soldNetWeight } = prep;
+      const { itemDto, currentTagWeight, soldNetWeight } = prep;
       let { makingChargesPerGram, itemTotalPrice } = prep;
+
+      const dbItem: any = await this.inventoryModel
+        .findById(itemDto.inventoryItem)
+        .exec();
 
       if (hasGlobalOverride && calculatedSumTotalPrice > 0) {
         const ratio = finalInvoiceTotalPrice / calculatedSumTotalPrice;
@@ -439,13 +462,12 @@ export class SalesService {
       let totalInvoiceNetWeight = 0;
 
       for (const prep of preparedItems) {
-        const {
-          itemDto: newItemDto,
-          dbItem,
-          currentTagWeight,
-          soldNetWeight,
-        } = prep;
+        const { itemDto: newItemDto, currentTagWeight, soldNetWeight } = prep;
         let { makingChargesPerGram, itemTotalPrice } = prep;
+
+        const dbItem: any = await this.inventoryModel
+          .findById(newItemDto.inventoryItem)
+          .exec();
 
         if (hasGlobalOverride && calculatedSumTotalPrice > 0) {
           const ratio = finalInvoiceTotalPrice / calculatedSumTotalPrice;
@@ -585,6 +607,17 @@ export class SalesService {
             },
           },
         );
+
+        // 🛠️ تم تعديل type إلى INVENTORY_IN متوافقاً مع Enum الخاص بـ StockMovementsService
+        await this.movementsService.logMovement({
+          inventoryItem: item.inventoryItem.toString(),
+          type: 'INVENTORY_IN',
+          countChange: 1,
+          grossWeightChange: item.soldGrossWeight,
+          netWeightChange: item.soldNetWeight,
+          actionBy: userId,
+          reason: `إلغاء فاتورة بيع رقم: ${invoice.invoiceNumber} وإعادة القطعة إلى المخزن`,
+        });
       }
     }
 

@@ -12,6 +12,10 @@ export class StockMovement extends Document {
       'SALE_OUT',
       'INVOICE_UPDATE_RETURN',
       'INVOICE_UPDATE_OUT',
+      'BULLION_IN',
+      'BULLION_SALE_OUT',
+      'BULLION_CANCEL_RETURN',
+      'BULLION_UPDATE_RETURN',
     ],
     required: true,
   })
