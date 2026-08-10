@@ -25,12 +25,12 @@ export class TagDetailDto {
 }
 
 export class CreateInventoryDto {
-  @ApiProperty({ example: 'حلق مكرونة' })
+  @ApiProperty({ example: 'سبيكة ذهب بي تي سي' })
   @IsString()
   @IsNotEmpty()
   title: string;
 
-  @ApiPropertyOptional({ example: 'ستار', description: 'اسم الشركة (اختياري)' })
+  @ApiPropertyOptional({ example: 'BTC', description: 'اسم الشركة (اختياري)' })
   @IsString()
   @IsOptional()
   companyName?: string;
@@ -40,17 +40,19 @@ export class CreateInventoryDto {
   @IsNotEmpty()
   category: string;
 
-  @ApiProperty({ example: 21, enum: [18, 21] })
+  @ApiProperty({ example: 24, enum: [18, 21, 24] })
   @IsNumber()
-  @IsEnum([18, 21], { message: 'العيار يجب أن يكون إما 18 أو 21 فقط' })
+  @IsEnum([18, 21, 24], {
+    message: 'العيار يجب أن يكون إما 18 أو 21 أو 24 فقط',
+  })
   karat: number;
 
-  @ApiProperty({ example: 60, minimum: 1 })
+  @ApiProperty({ example: 10, minimum: 1 })
   @IsNumber()
   @Min(1, { message: 'العدد الابتدائي يجب أن يكون قطعة واحدة على الأقل' })
   initialCount: number;
 
-  @ApiProperty({ example: 55.5 })
+  @ApiProperty({ example: 100.0 })
   @IsNumber()
   @Min(0.001, { message: 'الوزن الإجمالي يجب أن يكون أكبر من صفر' })
   totalGrossWeight: number;

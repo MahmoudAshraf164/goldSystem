@@ -13,21 +13,27 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'تسجيل الدخول الأولي (للمالك والموظف)' })
+  @ApiOperation({
+    summary: 'تسجيل الدخول المباشر وإصدار التوكن (للمالك والموظف)',
+  }) // 👈 تم تحديث الوصف هنا
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
   }
 
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'التحقق من رمز الـ OTP وإصدار التوكن (للمالك فقط)' })
+  @ApiOperation({
+    summary: 'التحقق من رمز الـ OTP عند إعادة تعيين كلمة المرور',
+  }) // 👈 تم تحديث الوصف ليتناسب مع التعديل الجديد
   async verifyOtp(@Body() verifyOtpDto: VerifyOtpDto) {
     return this.authService.verifyOtp(verifyOtpDto);
   }
 
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'طلب رابط إعادة تعيين كلمة المرور (عند النسيان)' })
+  @ApiOperation({
+    summary: 'طلب إرسال رمز OTP إلى البريد الإلكتروني (عند نسيان كلمة المرور)',
+  }) // 👈 تعديل بسيط ليكون أدق (لأننا نرسل كود وليس رابط)
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
     return this.authService.forgotPassword(forgotPasswordDto);
   }
@@ -35,7 +41,7 @@ export class AuthController {
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'إدخال التوكن وكلمة المرور الجديدة لتغييرها فعلياً',
+    summary: 'إدخال الـ OTP وكلمة المرور الجديدة لتغييرها فعلياً وتحديث الحساب',
   })
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetPassword(resetPasswordDto);

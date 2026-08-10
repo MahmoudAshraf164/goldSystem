@@ -1,14 +1,12 @@
 import {
   Controller,
   Get,
-  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { DailyLedgerService } from './daily-ledger.service';
-import { LedgerQueryDto } from './dto/ledger-query.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -22,17 +20,18 @@ export class DailyLedgerController {
   constructor(private readonly ledgerService: DailyLedgerService) {}
 
   @Get('report')
-  @Roles(Role.OWNER) // جرد الدفاتر والأموال الكلية حكر على المالك فقط
+  @Roles(Role.OWNER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'إحصائيات جرد الخزنة التراكمي والنقدي بجرامات العيارات (يومي/أسبوعي/شهري/مخصص)',
+      'تقرير جرد ومقارنة فوري ومقفل (اليوم / أمس / إجمالي السبعة أيام الفائتة كاملة) كاش وجرامات',
   })
-  async getReport(@Query() query: LedgerQueryDto) {
-    const report = await this.ledgerService.getLedgerReport(query);
+  async getReport() {
+    const report = await this.ledgerService.getLedgerReport();
     return {
       success: true,
-      message: 'تم احتساب تقرير دفتر اليومية وتفنيط جرامات الجرد بنجاح تام',
+      message:
+        'تم احتساب مقارنة الجرد لليوم وأمس وإجمالي الأسبوع المنصرم بنجاح تام',
       data: report,
     };
   }

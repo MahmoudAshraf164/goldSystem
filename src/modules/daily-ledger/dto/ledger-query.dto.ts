@@ -20,10 +20,10 @@ export class LedgerQueryDto {
 
   @ApiPropertyOptional({
     example: 'TODAY',
-    enum: ['TODAY', 'LAST_3_DAYS', 'WEEKLY', 'MONTHLY', 'YEARLY'],
+    enum: ['TODAY', 'YESTERDAY', 'WEEKLY'], // تنظيف الفلاتر لتطابق الفرونت إند بالظبط
     description: 'فلاتر سريعة جاهزة',
   })
   @IsString()
   @IsOptional()
-  preset?: 'TODAY' | 'LAST_3_DAYS' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+  preset?: 'TODAY' | 'YESTERDAY' | 'WEEKLY';
 }

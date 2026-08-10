@@ -10,8 +10,7 @@ import { LoginDto } from './dto/login.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-import { Role } from '../../common/enums/role.enum';
-import { generateOtp, getOtpExpiry } from '../../common/utils/otp.util';
+import { generateOtp, getOtpExpiry } from '../../common/utils/otp.util'; // 👈 تم تصحيح المسار هنا
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
@@ -22,7 +21,7 @@ export class AuthService {
     private readonly mailService: MailService,
   ) {}
 
-  // ─── 1. تسجيل الدخول الأولي ───
+  // ─── 1. تسجيل الدخول المباشر لجميع الأدوار (المالك والموظف) ───
   async login(loginDto: LoginDto) {
     const user = await this.usersService.findByEmail(loginDto.email);
 
@@ -40,34 +39,16 @@ export class AuthService {
       throw new UnauthorizedException('بيانات الاعتماد غير صحيحة');
     }
 
-    // الموظف يحصل على التوكن فوراً لتسهيل عمله اليومي
-    if (user.role === Role.Employee) {
-      const payload = { sub: user._id, email: user.email, role: user.role };
-      return {
-        requiresOtp: false,
-        accessToken: this.jwtService.sign(payload),
-        user: { id: user._id, fullName: user.fullName, role: user.role },
-      };
-    }
-
-    // المالك يتم توليد وإرسال رمز OTP لحماية الجرد
-    const otp = generateOtp();
-    const expiry = getOtpExpiry(10); // 10 دقائق
-
-    user.currentOtp = otp;
-    user.otpExpiresAt = expiry;
-    user.otpAttempts = 0;
-    await user.save();
-
-    await this.mailService.sendOtpEmail(user.email, otp);
-
+    // 🚀 الجميع (مالك وموظف) يحصل على التوكن فوراً بدون OTP
+    const payload = { sub: user._id, email: user.email, role: user.role };
     return {
-      requiresOtp: true,
-      message: 'تم إرسال رمز التحقق (OTP) إلى بريدك الإلكتروني بنجاح',
+      requiresOtp: false,
+      accessToken: this.jwtService.sign(payload),
+      user: { id: user._id, fullName: user.fullName, role: user.role },
     };
   }
 
-  // ─── 2. التحقق العام من الـ OTP (ل تسجيل الدخول أو نسيت كلمة المرور) ───
+  // ─── 2. التحقق من الـ OTP (لدعم شاشة نسيت كلمة المرور) ───
   async verifyOtp(verifyOtpDto: VerifyOtpDto) {
     const user = await this.usersService.findByEmail(verifyOtpDto.email);
 
@@ -99,24 +80,20 @@ export class AuthService {
       );
     }
 
-    // ملحوظة أمنية: لا نقوم بتصفير الـ OTP هنا إذا كان لغرض الـ Reset Password،
-    // بل نتركه ليتم التحقق منه كـ "تأكيد نهائي" في خطوة الحفظ الفعلي للباسورد.
-    // لكن لو الشخص داخل Login عادي، بنصدر التوكن ونصفره فوراً:
     const payload = { sub: user._id, email: user.email, role: user.role };
     return {
       message: 'تم التحقق من الرمز بنجاح',
-      accessToken: this.jwtService.sign(payload), // صالح لكل العمليات لاحقاً
+      accessToken: this.jwtService.sign(payload),
       user: { id: user._id, fullName: user.fullName, role: user.role },
     };
   }
 
-  // ─── 3. طلب نسيان كلمة المرور (إرسال OTP بدلاً من رابط) ───
+  // ─── 3. طلب نسيان كلمة المرور (إرسال OTP للإيميل) ───
   async forgotPassword(
     forgotPasswordDto: ForgotPasswordDto,
   ): Promise<{ message: string }> {
     const user = await this.usersService.findByEmail(forgotPasswordDto.email);
 
-    // حماية ضد الـ User Enumeration
     if (!user || user.status !== 'ACTIVE') {
       return {
         message:
@@ -124,16 +101,15 @@ export class AuthService {
       };
     }
 
-    // توليد OTP جديد خاص بطلب تعديل الباسورد وصالح لـ 10 دقائق
+    // توليد الـ OTP للمالك أو الموظف لاسترجاع الحساب
     const otp = generateOtp();
-    const expiry = getOtpExpiry(10);
+    const expiry = getOtpExpiry(10); // 10 دقائق
 
     user.currentOtp = otp;
     user.otpExpiresAt = expiry;
     user.otpAttempts = 0;
     await user.save();
 
-    // إرسال الـ OTP عبر الـ MailService المخصصة والمستقلة
     await this.mailService.sendOtpEmail(user.email, otp);
 
     return {
@@ -152,7 +128,6 @@ export class AuthService {
       throw new BadRequestException('طلب غير صالح');
     }
 
-    // فحص أمان أخير للتأكد من صحة الـ OTP قبل الحفظ النهائي في الداتا بيز
     if (
       !user.currentOtp ||
       !user.otpExpiresAt ||
@@ -167,7 +142,6 @@ export class AuthService {
       );
     }
 
-    // تشفير الباسورد الجديد وحفظه وتصفير حقول الأمان بالكامل
     user.passwordHash = await bcrypt.hash(resetPasswordDto.newPassword, 10);
     user.currentOtp = undefined;
     user.otpExpiresAt = undefined;

@@ -7,16 +7,18 @@ import { BullionInventoryModule } from '../bullion-inventory/bullion-inventory.m
 import { StockMovementsModule } from '../stock-movements/stock-movements.module';
 import { Customer, CustomerSchema } from '../customers/schemas/customer.schema';
 import { CustomersModule } from '../customers/customers.module';
+import { SafeModule } from '../safe/safe.module'; // 👈 استيراد موديول الخزنة
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: BullionSale.name, schema: BullionSaleSchema },
-      { name: Customer.name, schema: CustomerSchema }, // 👈 تسجيل اسكيما العميل لاستخدامها داخل الموديول
+      { name: Customer.name, schema: CustomerSchema },
     ]),
     BullionInventoryModule,
     StockMovementsModule,
-    CustomersModule, // 👈 استيراد موديول العملاء
+    CustomersModule,
+    SafeModule, // 👈 إضافته هنا ليصبح متاحاً للاستخدام
   ],
   controllers: [BullionSalesController],
   providers: [BullionSalesService],

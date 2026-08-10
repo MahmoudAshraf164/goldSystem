@@ -9,8 +9,14 @@ import {
   HttpCode,
   HttpStatus,
   Req,
+  Query,
 } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiBearerAuth,
+  ApiOperation,
+  ApiQuery,
+} from '@nestjs/swagger';
 import { ScrapInvoicesService } from './scrap-invoices.service';
 import { CreateScrapInvoiceDto } from './dto/create-scrap-invoice.dto';
 import { UpdateScrapInvoiceDto } from './dto/update-scrap-invoice.dto';
@@ -30,14 +36,15 @@ export class ScrapInvoicesController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'إصدار فاتورة بيع ذهب كسر لزبون بالوزن وخصمه من الخزنة تلقائياً',
+    summary:
+      'إصدار فاتورة بيع ذهب كسر لزبون بالوزن وخصمه من الخزنة تلقائياً مع توريد الكاش',
   })
   async createInvoice(@Body() dto: CreateScrapInvoiceDto, @Req() req: any) {
     const userId = req.user.id;
     const invoice = await this.scrapInvoicesService.createInvoice(dto, userId);
     return {
       message:
-        'تم إصدار فاتورة بيع الكسر واحتساب الإجمالي وتحديث وزن الخزنة بنجاح',
+        'تم إصدار فاتورة بيع الكسر واحتساب الإجمالي وتحديث وزن ومادية الخزنة بنجاح',
       data: invoice,
     };
   }
@@ -46,7 +53,8 @@ export class ScrapInvoicesController {
   @HttpCode(HttpStatus.OK)
   @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
-    summary: 'تعديل بيانات فاتورة بيع كسر وإعادة إيزان الخزنة تلقائياً',
+    summary:
+      'تعديل بيانات فاتورة بيع كسر وإعادة اتزان أوزان وكاش الخزنة تلقائياً',
   })
   async updateInvoice(
     @Param('id') id: string,
@@ -62,7 +70,8 @@ export class ScrapInvoicesController {
       userRole,
     );
     return {
-      message: 'تم تحديث فاتورة الكسر وإعادة ضبط أوزان الخزنة بنجاح',
+      message:
+        'تم تحديث فاتورة الكسر وإعادة ضبط الأوزان والفروقات المالية بالخزنة بنجاح',
       data: invoice,
     };
   }
@@ -72,7 +81,7 @@ export class ScrapInvoicesController {
   @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
     summary:
-      'إلغاء فاتورة بيع كسر وإعادة الوزن المباع للمخزن مع تصفير الأثر المالي',
+      'إلغاء فاتورة بيع كسر وإعادة الوزن للمخزن مع استرداد الكاش من الخزينة',
   })
   async cancelInvoice(@Param('id') id: string, @Req() req: any) {
     const userId = req.user.id;
@@ -83,7 +92,8 @@ export class ScrapInvoicesController {
       userRole,
     );
     return {
-      message: '❌ تم إلغاء فاتورة الكسر بالكامل، وإرجاع الوزن للخزنة بنجاح',
+      message:
+        '❌ تم إلغاء فاتورة الكسر بالكامل، وإرجاع الوزن واسترداد الكاش للخزنة بنجاح',
       data: invoice,
     };
   }
@@ -91,15 +101,42 @@ export class ScrapInvoicesController {
   @Get()
   @Roles(Role.OWNER, Role.Employee)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({
-    summary: 'عرض فواتير مبيعات الذهب الكسر',
+  @ApiQuery({
+    name: 'status',
+    required: false,
+    enum: ['COMPLETED', 'CANCELLED'],
   })
-  async findAll(@Req() req: any) {
+  @ApiQuery({ name: 'invoiceNumber', required: false })
+  @ApiQuery({
+    name: 'customerName',
+    required: false,
+    description: 'البحث باسم العميل',
+  })
+  @ApiQuery({
+    name: 'customerPhone',
+    required: false,
+    description: 'البحث برقم هاتف العميل',
+  })
+  @ApiOperation({
+    summary:
+      'عرض والبحث في فواتير مبيعات الذهب الكسر (بالاسم، الرقم، التليفون، الحالة)',
+  })
+  async findAll(
+    @Query('status') status?: string,
+    @Query('invoiceNumber') invoiceNumber?: string,
+    @Query('customerName') customerName?: string,
+    @Query('customerPhone') customerPhone?: string,
+    @Req() req?: any,
+  ) {
     const userId = req.user.id;
     const userRole = req.user.role;
-    const invoices = await this.scrapInvoicesService.findAll(userId, userRole);
+    const invoices = await this.scrapInvoicesService.findAll(
+      { status, invoiceNumber, customerName, customerPhone },
+      userId,
+      userRole,
+    );
     return {
-      message: 'تم جلب سجل فواتير مبيعات الكسر بنجاح',
+      message: 'تم جلب سجل فواتير مبيعات الكسر المحددة بنجاح',
       data: invoices,
     };
   }

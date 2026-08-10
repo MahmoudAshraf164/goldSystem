@@ -6,23 +6,26 @@ export class InvoiceItem {
   @Prop({ type: Types.ObjectId, ref: 'Inventory', required: true })
   inventoryItem: Types.ObjectId;
 
-  @Prop({ type: Number, required: true })
-  soldGrossWeight: number; // الوزن المدخل بالورقة
+  @Prop({ type: Number, required: true, min: 1, default: 1 })
+  soldCount: number; // 👈 حفظ عدد القطع المباعة في الفاتورة للرجوع إليها مستقبلاً
 
   @Prop({ type: Number, required: true })
-  soldNetWeight: number; // الصافي الفعلي بعد الحسبة
+  soldGrossWeight: number; // الوزن الإجمالي الكلي المدخل للمجموعه
+
+  @Prop({ type: Number, required: true })
+  soldNetWeight: number; // الصافي الفعلي للمجموعه بعد خصم التيكتات المتعددة
 
   @Prop({ type: Boolean, required: true, default: true })
   hasTag: boolean;
 
   @Prop({ type: Number, required: true })
-  goldPriceToday: number; // سعر الجرام وقت البيع
+  goldPriceToday: number;
 
   @Prop({ type: Number, required: true })
-  makingChargesPerGram: number; // مصنعية الجرام وقت البيع
+  makingChargesPerGram: number;
 
   @Prop({ type: Number, required: true })
-  itemTotalPrice: number; // إجمالي سعر هذه القطعة بشكل منفصل
+  itemTotalPrice: number; // إجمالي سعر القطع المجمعة معاً
 }
 
 @Schema({ timestamps: true })
@@ -46,7 +49,7 @@ export class Invoice extends Document {
   totalInvoiceNetWeight: number;
 
   @Prop({ type: Number, required: true })
-  totalPrice: number; // مجموع أسعار كل القطع تلقائياً
+  totalPrice: number;
 
   @Prop({
     type: String,

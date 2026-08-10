@@ -3,8 +3,9 @@ import { Document, Types } from 'mongoose';
 
 @Schema({ timestamps: true })
 export class StockMovement extends Document {
-  @Prop({ type: Types.ObjectId, required: true, index: true }) // 👈 تم إزالة ref: 'Inventory' الصارم لمنع الـ null مع الكسر
+  @Prop({ type: Types.ObjectId, required: true, index: true })
   inventoryItem: Types.ObjectId;
+
   @Prop({
     type: String,
     enum: [
@@ -12,29 +13,27 @@ export class StockMovement extends Document {
       'SALE_OUT',
       'INVOICE_UPDATE_RETURN',
       'INVOICE_UPDATE_OUT',
-      'BULLION_IN',
-      'BULLION_SALE_OUT',
-      'BULLION_CANCEL_RETURN',
-      'BULLION_UPDATE_RETURN',
+      'BULLION_IN', // 👈 تم إضافة نوع إدخال السبايك الجديد هنا
+      'BULLION_UPDATE_RETURN', // 👈 تم إضافة نوع تعديل السبايك الجديد هنا
     ],
     required: true,
   })
-  type: string; // نوع الحركة (إدخال مخزن، بيع، إرجاع بسبب تعديل، خصم بسبب تعديل)
+  type: string;
 
   @Prop({ type: Number, required: true })
-  countChange: number; // التغير في العدد (مثال: +25 أو -1)
+  countChange: number;
 
   @Prop({ type: Number, required: true })
-  grossWeightChange: number; // التغير في الوزن الإجمالي (بالسالب أو الموجب)
+  grossWeightChange: number;
 
   @Prop({ type: Number, required: true })
-  netWeightChange: number; // التغير في الوزن الصافي (بالسالب أو الموجب)
+  netWeightChange: number;
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-  actionBy: Types.ObjectId; // مين الموظف أو المالك اللي عمل الحركة دي
+  actionBy: Types.ObjectId;
 
   @Prop({ type: String, required: false })
-  reason?: string; // سبب اختياري (مثل: رقم الفاتورة أو "مخزون ابتدائي")
+  reason?: string;
 }
 
 export const StockMovementSchema = SchemaFactory.createForClass(StockMovement);

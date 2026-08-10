@@ -19,10 +19,10 @@ import { DailyLedgerModule } from './modules/daily-ledger/daily-ledger.module';
 import { PurchasesLedgerModule } from './modules/purchases-ledger/purchases-ledger.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
-import { ProfitLedgerModule } from './modules/profit-ledger/profit-ledger.module';
+import { IncomeModule } from './modules/income/income.module';
+import { SafeModule } from './modules/safe/safe.module';
 import { BullionInventoryModule } from './modules/bullion-inventory/bullion-inventory.module';
 import { BullionSalesModule } from './modules/bullion-sales/bullion-sales.module';
-import { BullionPurchasesModule } from './modules/bullion-purchases/bullion-purchases.module';
 
 @Module({
   imports: [
@@ -70,10 +70,10 @@ import { BullionPurchasesModule } from './modules/bullion-purchases/bullion-purc
     ExpensesModule,
     PurchasesLedgerModule,
     NotificationsModule,
-    ProfitLedgerModule,
+    IncomeModule,
+    SafeModule,
     BullionInventoryModule,
-    BullionSalesModule,
-    BullionPurchasesModule,
+    BullionSalesModule, // 👈 تم إضافته هنا لتسجيل موديول مبيعات السبايك
   ],
   controllers: [AppController],
 })

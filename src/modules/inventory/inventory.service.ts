@@ -69,13 +69,13 @@ export class InventoryService {
       grossWeightChange: savedItem.totalGrossWeight,
       netWeightChange: savedItem.totalNetWeight,
       actionBy: userId,
-      reason: `إدخال بضاعة لشركة (${savedItem.companyName}) باسم: ${title} - وزن ابتدائي قائم: ${totalGrossWeight}ج`,
+      reason: `إدخال بضاعة لشركة (${savedItem.companyName}) باسم: ${title} - عيار ${savedItem.karat} - وزن ابتدائي قائم: ${totalGrossWeight}ج`,
     });
 
     return savedItem;
   }
 
-  // 🛠️ 2. الدالة الجديدة: تزويد كمية/بضاعة إضافية على عنصر موجود (Restock)
+  // 2. تزويد كمية/بضاعة إضافية على عنصر موجود (Restock)
   async addStock(
     id: string,
     addStockDto: AddStockDto,
@@ -91,7 +91,6 @@ export class InventoryService {
       throw new NotFoundException('البضاعة المطلوبة غير موجودة أو مؤرشفة');
     }
 
-    // حساب إجمالي التيكت والعدد المضاف بالدفعة الجديدة
     let addedTagsWeight = 0;
     let addedTagsCount = 0;
 
@@ -118,7 +117,6 @@ export class InventoryService {
       );
     }
 
-    // دمج مصفوفات التيكت (إذا وجد تيكت بنفس الوزن يتم زيادته، وإلا يضاف عنصر جديد)
     const updatedTagDetails = [...item.tagDetails];
     if (tagDetails && tagDetails.length > 0) {
       for (const newTag of tagDetails) {
@@ -133,7 +131,6 @@ export class InventoryService {
       }
     }
 
-    // الحسبات الجديدة
     const newInitialCount = item.initialCount + count;
     const newCurrentCount = item.currentCount + count;
     const newInitialGrossWeight = parseFloat(
@@ -146,7 +143,6 @@ export class InventoryService {
       (item.totalNetWeight + addedNetWeight).toFixed(3),
     );
 
-    // تحديث قاعدة البيانات
     item.initialCount = newInitialCount;
     item.currentCount = newCurrentCount;
     item.initialGrossWeight = newInitialGrossWeight;
@@ -156,7 +152,6 @@ export class InventoryService {
 
     const savedItem = await item.save();
 
-    // تسجيل حركة مخزنية للتزويد
     await this.movementsService.logMovement({
       inventoryItem: savedItem._id.toString(),
       type: 'INVENTORY_IN',
@@ -164,7 +159,7 @@ export class InventoryService {
       grossWeightChange: grossWeight,
       netWeightChange: addedNetWeight,
       actionBy: userId,
-      reason: `إضافة كمية إضافية (+${count} قطعة) لـ (${savedItem.title}) - وزن قائم مضاف: ${grossWeight}ج`,
+      reason: `إضافة كمية إضافية (+${count} قطعة) لـ (${savedItem.title}) - عيار ${savedItem.karat} - وزن قائم مضاف: ${grossWeight}ج`,
     });
 
     return savedItem;
@@ -248,7 +243,7 @@ export class InventoryService {
         grossWeightChange: grossWeightDifference,
         netWeightChange: netWeightDifference,
         actionBy: userId,
-        reason: `تعديل الجرد لـ (${updatedItem.title}) - شركة (${updatedItem.companyName})`,
+        reason: `تعديل الجرد للمالك لـ (${updatedItem.title}) - عيار ${updatedItem.karat}`,
       });
     }
 

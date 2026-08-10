@@ -4,10 +4,10 @@ import { Document, Types } from 'mongoose';
 @Schema()
 export class TagDetail {
   @Prop({ type: Number, required: true, min: 0 })
-  count: number; // عدد القطع بهذا الوزن (مثال: 5)
+  count: number;
 
   @Prop({ type: Number, required: true, min: 0 })
-  weight: number; // وزن التيكت الواحد (مثال: 0.04)
+  weight: number;
 }
 
 @Schema({ timestamps: true })
@@ -22,12 +22,13 @@ export class Inventory extends Document {
     default: '-',
     index: true,
   })
-  companyName: string; // اختياري، القيمة الافتراضية للفلترة هي '-'
+  companyName: string;
 
   @Prop({ type: Types.ObjectId, ref: 'Category', required: true, index: true })
   category: Types.ObjectId;
 
-  @Prop({ type: Number, required: true, enum: [18, 21], index: true })
+  // 🛠️ تحديث الـ enum ليشمل عيار 24
+  @Prop({ type: Number, required: true, enum: [18, 21, 24], index: true })
   karat: number;
 
   @Prop({ type: Number, required: true, min: 1 })
@@ -37,16 +38,16 @@ export class Inventory extends Document {
   currentCount: number;
 
   @Prop({ type: Number, required: true, min: 0 })
-  initialGrossWeight: number; // 🛠️ تثبيت الوزن الابتدائي عند أول إدخال لمراجعته دائماً
+  initialGrossWeight: number;
 
   @Prop({ type: Number, required: true, min: 0 })
-  totalGrossWeight: number; // الوزن القائم الحالي (يقل مع المبيعات)
+  totalGrossWeight: number;
 
   @Prop({ type: Number, required: true, min: 0 })
-  totalNetWeight: number; // الوزن الصافي الحالي
+  totalNetWeight: number;
 
   @Prop({ type: [TagDetail], default: [] })
-  tagDetails: TagDetail[]; // 🛠️ المصفوفة المرنة لتعدد أوزان التيكت في الشحنة الواحدة
+  tagDetails: TagDetail[];
 
   @Prop({ type: Boolean, default: false, index: true })
   isArchived: boolean;

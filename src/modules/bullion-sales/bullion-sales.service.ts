@@ -10,6 +10,7 @@ import { BullionSale, BullionSaleStatus } from './schemas/bullion-sale.schema';
 import { BullionInventory } from '../bullion-inventory/schemas/bullion-inventory.schema';
 import { Customer } from '../customers/schemas/customer.schema';
 import { StockMovementsService } from '../stock-movements/stock-movements.service';
+import { SafeService } from '../safe/safe.service'; // 👈 استيراد خدمة الخزنة
 import { CreateBullionSaleDto } from './dto/create-bullion-sale.dto';
 import { UpdateBullionSaleDto } from './dto/update-bullion-sale.dto';
 import { Role } from '../../common/enums/role.enum';
@@ -21,12 +22,11 @@ export class BullionSalesService {
     private readonly saleModel: Model<BullionSale>,
     @InjectModel(BullionInventory.name)
     private readonly bullionModel: Model<BullionInventory>,
-    @InjectModel(Customer.name)
-    private readonly customerModel: Model<Customer>,
+    @InjectModel(Customer.name) private readonly customerModel: Model<Customer>,
     private readonly movementsService: StockMovementsService,
+    private readonly safeService: SafeService, // 👈 حقن خدمة الخزنة هنا
   ) {}
 
-  // ─── مساعد داخلي لفحص الصلاحيات ───
   private validateOwnership(sale: BullionSale, user: any) {
     const userId = user.id || user._id;
     const isOwner = user.role === Role.OWNER;
@@ -49,9 +49,8 @@ export class BullionSalesService {
     }
 
     const customer = await this.customerModel.findById(dto.customerId).exec();
-    if (!customer) {
+    if (!customer)
       throw new NotFoundException('العميل المحدد غير موجود بالنظام');
-    }
 
     let totalGoldWeight = 0;
     let totalMakingCharges = 0;
@@ -70,7 +69,7 @@ export class BullionSalesService {
 
       if (bullion.quantity < itemDto.quantity) {
         throw new BadRequestException(
-          `الكمية المتاحة في المخزن من "${bullion.title}" غير كافية. المتاح: ${bullion.quantity}`,
+          `الكمية المتاحة في المخزن من "${bullion.title}" غير كافية.`,
         );
       }
 
@@ -78,7 +77,6 @@ export class BullionSalesService {
         itemDto.makingChargePerUnit !== undefined
           ? itemDto.makingChargePerUnit
           : bullion.makingChargePerUnit;
-
       const itemGoldWeight = parseFloat(
         (bullion.weightPerUnit * itemDto.quantity).toFixed(3),
       );
@@ -117,15 +115,20 @@ export class BullionSalesService {
     });
 
     const savedInvoice = await newInvoice.save();
-
     const customerDisplayName =
       (customer as any).fullName || (customer as any).name || 'عميل';
+
+    // 👈 تحديث رصيد الخزنة (إدخال الكاش الوارد من الفاتورة)
+    await this.safeService.updateSafeBalanceAutomatically(
+      savedInvoice.grandTotal,
+      'BULLION_SALE',
+      `فاتورة بيع سبايك رقم ${savedInvoice.invoiceNumber} للعميل ${customerDisplayName}`,
+    );
 
     for (const item of processedItems) {
       await this.bullionModel.findByIdAndUpdate(item.bullionItem, {
         $inc: { quantity: -item.quantity },
       });
-
       const totalItemWeight = item.weightPerUnit * item.quantity;
 
       await this.movementsService.logMovement({
@@ -142,64 +145,52 @@ export class BullionSalesService {
     return savedInvoice;
   }
 
-  // ─── 2. جلب الفواتير (الكل للمالك / فواتير الموظف فقط للموظف) ───
+  // ─── 2. جلب جميع الفواتير ───
   async findAllInvoices(
     user: any,
     query?: { status?: BullionSaleStatus; search?: string },
   ): Promise<BullionSale[]> {
     const filter: any = {};
-
-    // 👈 إذا لم يكن المالك (أي موظف)، يرى فقط الفواتير التي أصدرها
     if (user.role !== Role.OWNER) {
       const userId = user.id || user._id;
       filter.seller = new Types.ObjectId(userId);
     }
-
     if (query?.status) filter.status = query.status;
 
     return this.saleModel
       .find(filter)
-      .populate('customer', 'fullName name phone nationalId email')
+      .populate('customer', 'fullName name phone')
       .populate('seller', 'fullName role')
       .sort({ createdAt: -1 })
       .exec();
   }
 
-  // ─── 3. جلب فاتورة محددة بالـ ID ───
+  // ─── 3. جلب فاتورة واحدة ───
   async findOneInvoice(id: string, user: any): Promise<BullionSale> {
     const sale = await this.saleModel
       .findById(id)
-      .populate('customer', 'fullName name phone nationalId email')
+      .populate('customer', 'fullName name phone')
       .populate('seller', 'fullName role')
       .exec();
-
     if (!sale) throw new NotFoundException('فاتورة السبايك غير موجودة');
-
-    // 👈 التحقق من الملكية
     this.validateOwnership(sale, user);
-
     return sale;
   }
 
-  // ─── 4. تعديل فاتورة بيع سبايك ───
+  // ─── 4. تعديل فاتورة بيع سبايك (وتسوية فوارق كاش الخزنة) ───
   async updateSaleInvoice(
     id: string,
     dto: UpdateBullionSaleDto,
     user: any,
   ): Promise<BullionSale> {
     const sale = await this.saleModel.findById(id).exec();
-    if (!sale) {
-      throw new NotFoundException('الفاتورة غير موجودة');
-    }
-
-    // 👈 التحقق من الصلاحيات
+    if (!sale) throw new NotFoundException('الفاتورة غير موجودة');
     this.validateOwnership(sale, user);
-
-    if (sale.status === BullionSaleStatus.CANCELLED) {
+    if (sale.status === BullionSaleStatus.CANCELLED)
       throw new BadRequestException('لا يمكن تعديل فاتورة ملغاة');
-    }
 
     const userId = user.id || user._id;
+    const oldGrandTotal = sale.grandTotal; // الاحتفاظ بالقيمة القديمة لحساب الفارق المالي
 
     if (dto.customerId) {
       const customer = await this.customerModel.findById(dto.customerId).exec();
@@ -208,6 +199,7 @@ export class BullionSalesService {
     }
 
     if (dto.items && dto.items.length > 0) {
+      // إرجاع الكميات السابقة مؤقتاً للمخزن لضبط الحسبة الجديدة
       for (const oldItem of sale.items) {
         await this.bullionModel.findByIdAndUpdate(oldItem.bullionItem, {
           $inc: { quantity: oldItem.quantity },
@@ -223,13 +215,12 @@ export class BullionSalesService {
         const bullion = await this.bullionModel
           .findById(itemDto.bullionItem)
           .exec();
-        if (!bullion || bullion.isArchived) {
-          throw new NotFoundException(`السبيكة/الجنيه غير موجود بالمخزن`);
-        }
+        if (!bullion || bullion.isArchived)
+          throw new NotFoundException(`السبيكة غير موجودة بمخزنها`);
 
         if (bullion.quantity < itemDto.quantity) {
           throw new BadRequestException(
-            `الكمية المتاحة في المخزن من "${bullion.title}" غير كافية للتعديل. المتاح: ${bullion.quantity}`,
+            `الكمية المتاحة من "${bullion.title}" غير كافية للتعديل.`,
           );
         }
 
@@ -237,7 +228,6 @@ export class BullionSalesService {
           itemDto.makingChargePerUnit !== undefined
             ? itemDto.makingChargePerUnit
             : bullion.makingChargePerUnit;
-
         const itemGoldWeight = parseFloat(
           (bullion.weightPerUnit * itemDto.quantity).toFixed(3),
         );
@@ -283,7 +273,7 @@ export class BullionSalesService {
             grossWeightChange: -weightDiff,
             netWeightChange: -weightDiff,
             actionBy: userId,
-            reason: `تعديل فاتورة السبايك رقم: ${sale.invoiceNumber} (تعديل كمية من ${oldQty} إلى ${itemDto.quantity})`,
+            reason: `تعديل كمية الفاتورة رقم: ${sale.invoiceNumber}`,
           });
         }
       }
@@ -293,12 +283,22 @@ export class BullionSalesService {
       sale.totalMakingCharges = parseFloat(totalMakingCharges.toFixed(2));
       sale.grandTotal = parseFloat(grandTotal.toFixed(2));
       sale.paidAmount = parseFloat(grandTotal.toFixed(2));
+
+      // 👈 تسوية فرق الكاش في الخزنة (الجديد - القديم)
+      const cashDifference = sale.grandTotal - oldGrandTotal;
+      if (cashDifference !== 0) {
+        await this.safeService.updateSafeBalanceAutomatically(
+          cashDifference,
+          'BULLION_SALE_EDIT',
+          `تعديل مالي تلقائي للفاتورة رقم ${sale.invoiceNumber} بفارق قدره: ${cashDifference}`,
+        );
+      }
     }
 
     return await sale.save();
   }
 
-  // ─── 5. إلغاء الفاتورة ───
+  // ─── 5. إلغاء الفاتورة (وإرجاع المبلغ من الخزنة فوراً) ───
   async cancelInvoice(
     id: string,
     user: any,
@@ -306,23 +306,25 @@ export class BullionSalesService {
   ): Promise<BullionSale> {
     const sale = await this.saleModel.findById(id).exec();
     if (!sale) throw new NotFoundException('الفاتورة غير موجودة');
-
-    // 👈 التحقق من الصلاحيات
     this.validateOwnership(sale, user);
-
-    if (sale.status === BullionSaleStatus.CANCELLED) {
+    if (sale.status === BullionSaleStatus.CANCELLED)
       throw new BadRequestException('الفاتورة ملغاة بالفعل مسبقاً');
-    }
 
     const userId = user.id || user._id;
     sale.status = BullionSaleStatus.CANCELLED;
     const updatedSale = await sale.save();
 
+    // 👈 سحب كاش الفاتورة الملغاة من الخزنة بالماينس (-)
+    await this.safeService.updateSafeBalanceAutomatically(
+      -sale.grandTotal,
+      'BULLION_SALE_CANCEL',
+      `إلغاء فاتورة السبايك رقم ${sale.invoiceNumber} واسترجاع العميل للأموال. السبب: ${reason || 'بدون سبب مذكور'}`,
+    );
+
     for (const item of sale.items) {
       await this.bullionModel.findByIdAndUpdate(item.bullionItem, {
         $inc: { quantity: item.quantity },
       });
-
       const totalItemWeight = item.weightPerUnit * item.quantity;
 
       await this.movementsService.logMovement({

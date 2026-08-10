@@ -7,22 +7,21 @@ import {
   ScrapInvoice,
   ScrapInvoiceSchema,
 } from '../scrap-invoices/schemas/scrap-invoice.schema';
+import { Income, IncomeSchema } from '../income/schemas/income.schema';
+import { Expense, ExpenseSchema } from '../expenses/schemas/expense.schema';
 import {
   BullionSale,
   BullionSaleSchema,
-} from '../bullion-sales/schemas/bullion-sale.schema';
-import {
-  BullionPurchase,
-  BullionPurchaseSchema,
-} from '../bullion-purchases/schemas/bullion-purchase.schema';
+} from '../bullion-sales/schemas/bullion-sale.schema'; // 👈 استيراد موديل السبايك
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Invoice.name, schema: InvoiceSchema },
       { name: ScrapInvoice.name, schema: ScrapInvoiceSchema },
-      { name: BullionSale.name, schema: BullionSaleSchema },
-      { name: BullionPurchase.name, schema: BullionPurchaseSchema },
+      { name: Income.name, schema: IncomeSchema },
+      { name: Expense.name, schema: ExpenseSchema },
+      { name: BullionSale.name, schema: BullionSaleSchema }, // 👈 تسجيل الموديل هنا
     ]),
   ],
   controllers: [DailyLedgerController],

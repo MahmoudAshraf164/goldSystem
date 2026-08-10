@@ -20,10 +20,10 @@ export class PurchasesQueryDto {
 
   @ApiPropertyOptional({
     example: 'TODAY',
-    enum: ['TODAY', 'LAST_3_DAYS', 'WEEKLY', 'MONTHLY', 'YEARLY'],
+    enum: ['TODAY', 'YESTERDAY', 'WEEKLY', 'MONTHLY'], // 👈 تم تنظيفها لتشمل المطلوب فقط
     description: 'فلاتر سريعة',
   })
   @IsString()
   @IsOptional()
-  preset?: 'TODAY' | 'LAST_3_DAYS' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
+  preset?: 'TODAY' | 'YESTERDAY' | 'WEEKLY' | 'MONTHLY';
 }

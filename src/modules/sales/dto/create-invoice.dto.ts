@@ -21,8 +21,17 @@ export class CreateInvoiceItemDto {
   inventoryItem: string;
 
   @ApiProperty({
-    example: 12.5,
-    description: 'الوزن الإجمالي المدخل من الميزان شامل التيكت إن وجد',
+    example: 3,
+    description: 'عدد القطع المباعة من نفس هذا الصنف (مثال: 3 خواتم)',
+  })
+  @IsNumber()
+  @Min(1, { message: 'يجب بيع قطعة واحدة على الأقل' })
+  soldCount: number; // 👈 إضافة عدد القطع المجمعة
+
+  @ApiProperty({
+    example: 7.5,
+    description:
+      'الوزن الإجمالي المدخل من الميزان لجميع القطع معاً شامل التيكتات إن وجدت',
   })
   @IsNumber()
   @Min(0.001, { message: 'الوزن الإجمالي يجب أن يكون أكبر من صفر' })
@@ -31,16 +40,16 @@ export class CreateInvoiceItemDto {
   @ApiProperty({
     example: true,
     description:
-      'هل الوزن شامل ورقة التيكت؟ لو true يخصم وزن تيكت الشركة ديناميكياً، لو false ينزل الصافي كامل',
+      'هل الوزن شامل ورقة التيكت؟ لو true يخصم وزن تيكت الشركة ديناميكياً للقطع الكلية',
   })
   @IsBoolean()
   @IsNotEmpty()
   hasTag: boolean;
 
   @ApiPropertyOptional({
-    example: 0.04,
+    example: 0.06,
     description:
-      'وزن التيكت المحدد والمبعوث من شاشة البيع (اختياري، في حال عدم إرساله يؤخذ أول وزن متاح بالمخزن)',
+      'وزن التيكت المحدد (اختياري، في حال عدم إرساله يؤخذ أوزان التيكتات المتاحة بالمخزن تلقائياً)',
   })
   @IsNumber()
   @IsOptional()
@@ -54,20 +63,19 @@ export class CreateInvoiceItemDto {
   @Min(0)
   goldPriceToday: number;
 
-  @ApiProperty({ example: 150, description: 'سعر مصنعية الجرام الواحد للقطعة' })
+  @ApiProperty({ example: 150, description: 'سعر مصنعية الجرام الواحد للقطع' })
   @IsNumber()
   @Min(0)
   makingChargesPerGram: number;
 
   @ApiPropertyOptional({
-    example: 5000,
-    description:
-      'إجمالي سعر هذه القطعة النهائي بعد الخصم/الفصال (اختياري - يعيد حساب المصنعية على الصافي)',
+    example: 30000,
+    description: 'إجمالي سعر هذه المجموعه النهائي بعد الخصم/الفصال (اختياري)',
   })
   @IsOptional()
   @IsNumber()
   @Min(0)
-  itemTotalPrice?: number; // 👈 إجمالي القطعة الفردية اختياري
+  itemTotalPrice?: number;
 }
 
 export class CreateInvoiceDto {
@@ -90,11 +98,10 @@ export class CreateInvoiceDto {
 
   @ApiPropertyOptional({
     example: 50000,
-    description:
-      'إجمالي سعر الفاتورة بالكامل بعد الخصم (اختياري - يوزع الخصم على مصنعية القطع نسبياً)',
+    description: 'إجمالي سعر الفاتورة بالكامل بعد الخصم (اختياري)',
   })
   @IsOptional()
   @IsNumber()
   @Min(0)
-  totalPrice?: number; // 👈 إجمالي الفاتورة الكلي اختياري
+  totalPrice?: number;
 }

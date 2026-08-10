@@ -29,15 +29,16 @@ import { Role } from '../../common/enums/role.enum';
 @ApiTags('Inventory (New Gold)')
 @ApiBearerAuth('access-token')
 @UseGuards(AuthGuard, RolesGuard)
+@Roles(Role.OWNER) // 🔒 تم القفل بالكامل للمالك على مستوى الكنترولر كاملاً
 @Controller('inventory')
 export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Post()
-  @Roles(Role.OWNER)
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({
-    summary: 'إضافة بضاعة جديدة للمخزن بحسبة التيكت الديناميكية واسم الشركة',
+    summary:
+      'إضافة بضاعة جديدة للمخزن بحسبة التيكت الديناميكية واسم الشركة (للمالك فقط)',
   })
   async create(
     @Body() createInventoryDto: CreateInventoryDto,
@@ -52,12 +53,11 @@ export class InventoryController {
     };
   }
 
-  // 🛠️ الـ Endpoint الجديدة لتزويد كمية إضافية على عنصر موجود (Restock)
   @Post(':id/restock')
-  @Roles(Role.OWNER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'تزويد كمية وأوزان إضافية على بضاعة موجودة بالرمز/الـ ID',
+    summary:
+      'تزويد كمية وأوزان إضافية على بضاعة موجودة بالرمز/الـ ID (للمالك فقط)',
   })
   async restock(
     @Param('id') id: string,
@@ -73,7 +73,6 @@ export class InventoryController {
   }
 
   @Put(':id')
-  @Roles(Role.OWNER)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'تعديل بيانات وأوزان مجموعة ذهب في المخزن (للمالك فقط)',
@@ -96,10 +95,10 @@ export class InventoryController {
   }
 
   @Get()
-  @Roles(Role.OWNER, Role.Employee)
+  @Roles(Role.OWNER, Role.Employee) // 👈 تم السماح للموظف والمالك بعرض المخزن
   @HttpCode(HttpStatus.OK)
   @ApiQuery({ name: 'status', required: false, enum: ['ACTIVE', 'ARCHIVED'] })
-  @ApiQuery({ name: 'karat', required: false, enum: [18, 21] })
+  @ApiQuery({ name: 'karat', required: false, enum: [18, 21, 24] })
   @ApiQuery({
     name: 'companyName',
     required: false,
@@ -107,7 +106,7 @@ export class InventoryController {
   })
   @ApiOperation({
     summary:
-      'عرض مخزون الذهب المتاح مع دعم الفلترة بالشركة أو العيار أو الحالة',
+      'عرض مخزون الذهب المتاح مع دعم الفلترة بالشركة أو العيار أو الحالة (للمالك فقط)',
   })
   async findAll(
     @Query('status') status?: string,
@@ -127,9 +126,11 @@ export class InventoryController {
   }
 
   @Get(':id')
-  @Roles(Role.OWNER, Role.Employee)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'تفاصيل قطعة/مجموعة ذهب معينة بالـ ID' })
+  @Roles(Role.OWNER, Role.Employee)
+  @ApiOperation({
+    summary: 'تفاصيل قطعة/مجموعة ذهب معينة بالـ ID (للمالك فقط)',
+  })
   async findOne(@Param('id') id: string) {
     const item = await this.inventoryService.findById(id);
     return {
@@ -139,9 +140,10 @@ export class InventoryController {
   }
 
   @Delete(':id')
-  @Roles(Role.OWNER)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'أرشفة وحذف قطعة ذهب ناعماً من المخزن' })
+  @ApiOperation({
+    summary: 'أرشفة وحذف قطعة ذهب ناعماً من المخزن (للمالك فقط)',
+  })
   async remove(@Param('id') id: string) {
     await this.inventoryService.softDelete(id);
     return {

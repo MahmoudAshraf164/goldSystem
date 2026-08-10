@@ -6,12 +6,7 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiBearerAuth,
-  ApiOperation,
-  ApiResponse,
-} from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PurchasesLedgerService } from './purchases-ledger.service';
 import { PurchasesQueryDto } from './dto/purchases-query.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
@@ -29,14 +24,11 @@ export class PurchasesLedgerController {
   ) {}
 
   @Get('report')
-  @Roles(Role.OWNER) // متاح للمالك فقط للحفاظ على خصوصية الخزنة والأرقام
+  @Roles(Role.OWNER) // كشوف خوارج الخزنة للمالك فقط لحماية أسرار المحل
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
-    summary: 'تقرير شامل بكافة الخوارج الكاش (مصاريف، كسر، سبايك وجنيهات)',
-  })
-  @ApiResponse({
-    status: 200,
-    description: 'تم جلب تقرير الخوارج والمشتريات بنجاح.',
+    summary:
+      'حساب وعرض مجموع المشتريات والخوارج الكاش والجرامات (يومي/أسبوعي/شهري/مخصص)',
   })
   async getOutflowsReport(@Query() query: PurchasesQueryDto) {
     const report = await this.purchasesLedgerService.getOutflowsReport(query);

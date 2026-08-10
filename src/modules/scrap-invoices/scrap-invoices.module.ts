@@ -12,6 +12,7 @@ import {
   ScrapGoldSchema,
 } from '../scrap-gold/schemas/scrap-gold.schema';
 import { StockMovementsModule } from '../stock-movements/stock-movements.module';
+import { SafeModule } from '../safe/safe.module'; // 👈 استيراد موديول الخزنة
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { StockMovementsModule } from '../stock-movements/stock-movements.module'
       { name: ScrapGold.name, schema: ScrapGoldSchema },
     ]),
     StockMovementsModule,
+    SafeModule, // 👈 حقن الخزنة هنا لربطها مالياً
   ],
   controllers: [ScrapInvoicesController],
   providers: [ScrapInvoicesService],

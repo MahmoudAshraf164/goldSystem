@@ -13,6 +13,7 @@ import { ScrapGold } from '../scrap-gold/schemas/scrap-gold.schema';
 import { Customer } from '../customers/schemas/customer.schema';
 import { StockMovementsService } from '../stock-movements/stock-movements.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
+import { SafeService } from '../safe/safe.service'; // 👈 استيراد خدمة الخزنة
 
 @Injectable()
 export class ScrapInvoicesService {
@@ -23,9 +24,10 @@ export class ScrapInvoicesService {
     @InjectModel(ScrapGold.name) private readonly scrapModel: Model<ScrapGold>,
     private readonly movementsService: StockMovementsService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly safeService: SafeService, // 👈 حقن الخزنة
   ) {}
 
-  // ─── 1. إصدار فاتورة بيع كسر جديدة ───
+  // ─── 1. إصدار فاتورة بيع كسر جديدة وتوريد الكاش للخزنة ───
   async createInvoice(
     dto: CreateScrapInvoiceDto,
     userId: string,
@@ -48,13 +50,11 @@ export class ScrapInvoicesService {
       );
     }
 
-    // 💡 احتساب المصنعية والإجمالي تلقائياً بناءً على ما إذا كان الفرونت أرسل totalPrice أعده يدويًا أم لا
     let finalTotalPrice: number;
     let finalMakingChargesPerGram: number;
 
     if (dto.totalPrice !== undefined && dto.totalPrice !== null) {
       finalTotalPrice = Number(dto.totalPrice.toFixed(2));
-      // المعادلة: المصنعية للجرام = (الإجمالي / الوزن) - سعر اليوم
       const calculatedMaking = finalTotalPrice / weight - goldPriceToday;
 
       if (calculatedMaking < 0) {
@@ -70,7 +70,6 @@ export class ScrapInvoicesService {
       );
     }
 
-    // خصم الوزن من الخزنة
     scrapRecord.totalWeight = Number(
       (scrapRecord.totalWeight - weight).toFixed(3),
     );
@@ -100,6 +99,14 @@ export class ScrapInvoicesService {
       reason: `بيع ذهب كسر عيار ${karat} بسعر جرام ${goldPriceToday} ومصنعية ${finalMakingChargesPerGram} بموجب فاتورة رقم: ${invoiceNumber}`,
     });
 
+    // 💰 [الخزنة] توريد إجمالي الفاتورة للدرج
+    await this.safeService.triggerTransaction(
+      savedInvoice.totalPrice,
+      'INFLOW',
+      `بيع ذهب كسر - فاتورة رقم #${savedInvoice.invoiceNumber}`,
+      userId,
+    );
+
     const populatedInvoice = await savedInvoice.populate([
       { path: 'customer', select: 'fullName phoneNumber' },
       { path: 'actionBy', select: 'fullName role' },
@@ -109,7 +116,7 @@ export class ScrapInvoicesService {
     return populatedInvoice;
   }
 
-  // ─── 2. تحديث وتعديل الفاتورة ───
+  // ─── 2. تحديث وتعديل الفاتورة وموازنة فروق الخزنة ───
   async updateInvoice(
     id: string,
     dto: UpdateScrapInvoiceDto,
@@ -133,6 +140,9 @@ export class ScrapInvoicesService {
       );
     }
 
+    // 💰 حفظ السعر القديم للمقارنة
+    const oldPrice = oldInvoice.totalPrice;
+
     const targetKarat = dto.karat !== undefined ? dto.karat : oldInvoice.karat;
     const targetWeight =
       dto.weight !== undefined ? dto.weight : oldInvoice.weight;
@@ -141,7 +151,6 @@ export class ScrapInvoicesService {
         ? dto.goldPriceToday
         : oldInvoice.goldPriceToday;
 
-    // إعادة تسوية الأوزان في المخزن إذا تغير العيار أو الوزن
     if (dto.karat !== undefined || dto.weight !== undefined) {
       const oldScrapRecord = await this.scrapModel
         .findOne({ karat: oldInvoice.karat })
@@ -209,7 +218,6 @@ export class ScrapInvoicesService {
       oldInvoice.customer = new Types.ObjectId(dto.customer);
     }
 
-    // 💡 أخذ التسعير والمصنعية والتأكد إن كان هناك totalPrice يدوياً
     oldInvoice.goldPriceToday = targetPriceToday;
 
     if (dto.totalPrice !== undefined && dto.totalPrice !== null) {
@@ -227,20 +235,41 @@ export class ScrapInvoicesService {
         dto.makingChargesPerGram !== undefined
           ? dto.makingChargesPerGram
           : oldInvoice.makingChargesPerGram;
-
       oldInvoice.makingChargesPerGram = targetMakingCharges;
       oldInvoice.totalPrice = Number(
         (targetWeight * (targetPriceToday + targetMakingCharges)).toFixed(2),
       );
     }
 
-    return (await oldInvoice.save()).populate([
+    const updatedInvoice = await oldInvoice.save();
+
+    // 💰 [الخزنة] حساب الفروقات وتعديل الكاش
+    const newPrice = updatedInvoice.totalPrice;
+    const diff = Number((newPrice - oldPrice).toFixed(2));
+
+    if (diff > 0) {
+      await this.safeService.triggerTransaction(
+        diff,
+        'INFLOW',
+        `تعديل فاتورة بيع كسر رقم #${updatedInvoice.invoiceNumber} (زيادة قيمة الفاتورة)`,
+        userId,
+      );
+    } else if (diff < 0) {
+      await this.safeService.triggerTransaction(
+        Math.abs(diff),
+        'OUTFLOW',
+        `تعديل فاتورة بيع كسر رقم #${updatedInvoice.invoiceNumber} (تخفيض قيمة الفاتورة)`,
+        userId,
+      );
+    }
+
+    return updatedInvoice.populate([
       { path: 'customer', select: 'fullName phoneNumber' },
       { path: 'actionBy', select: 'fullName role' },
     ]);
   }
 
-  // ─── 3. إلغاء واسترجاع الفاتورة بالكامل ───
+  // ─── 3. إلغاء واسترجاع الفاتورة بالكامل وتصفير الكاش ───
   async cancelInvoice(
     id: string,
     userId: string,
@@ -263,10 +292,12 @@ export class ScrapInvoicesService {
       );
     }
 
+    // 💰 حفظ القيمة المادية لسحبها من الخزينة
+    const priceToRefund = invoice.totalPrice;
+
     const scrapRecord = await this.scrapModel
       .findOne({ karat: invoice.karat })
       .exec();
-
     if (scrapRecord) {
       scrapRecord.totalWeight = Number(
         (scrapRecord.totalWeight + invoice.weight).toFixed(3),
@@ -286,21 +317,67 @@ export class ScrapInvoicesService {
 
     invoice.status = 'CANCELLED';
     invoice.totalPrice = 0;
+    const cancelledInvoice = await invoice.save();
 
-    return (await invoice.save()).populate([
+    // 💰 [الخزنة] سحب كاش الفاتورة بالكامل من الدرج وارتجاعه للعميل
+    if (priceToRefund > 0) {
+      await this.safeService.triggerTransaction(
+        priceToRefund,
+        'OUTFLOW',
+        `إلغاء فاتورة بيع الكسر رقم #${cancelledInvoice.invoiceNumber} وارتجاع النقدية للعميل`,
+        userId,
+      );
+    }
+
+    return cancelledInvoice.populate([
       { path: 'customer', select: 'fullName phoneNumber' },
       { path: 'actionBy', select: 'fullName role' },
     ]);
   }
 
-  // ─── 4. جلب الفواتير ───
-  async findAll(userId: string, userRole: string): Promise<ScrapInvoice[]> {
-    const normalizedRole = userRole ? userRole.toUpperCase() : '';
+  // ─── 4. جلب الفواتير (مع البحث المتقدم بالاسم والرقم) ───
+  async findAll(
+    query: {
+      status?: string;
+      invoiceNumber?: string;
+      customerName?: string;
+      customerPhone?: string;
+    },
+    userId: string,
+    userRole: string,
+  ): Promise<ScrapInvoice[]> {
     const filter: any = {};
+    const normalizedRole = userRole ? userRole.toUpperCase() : '';
 
-    if (normalizedRole !== 'OWNER') {
-      filter.actionBy = new Types.ObjectId(userId);
+    if (query.status) filter.status = query.status.toUpperCase();
+    if (query.invoiceNumber)
+      filter.invoiceNumber = { $regex: query.invoiceNumber, $options: 'i' };
+
+    // 🔍 البحث بالعميل
+    if (query.customerName || query.customerPhone) {
+      const customerFilter: any = {};
+      if (query.customerName) {
+        customerFilter.fullName = { $regex: query.customerName, $options: 'i' };
+      }
+      if (query.customerPhone) {
+        customerFilter.phoneNumber = {
+          $regex: query.customerPhone,
+          $options: 'i',
+        };
+      }
+
+      const matchedCustomers = await this.customerModel
+        .find(customerFilter)
+        .select('_id')
+        .exec();
+      const customerIds = matchedCustomers.map((c) => c._id);
+      filter.customer = { $in: customerIds };
     }
+
+    // ⛔ تم إيقاف شرط الفلترة أدناه لتظهر جميع فواتير الكسر لكافة الموظفين والمستخدمين
+    // if (normalizedRole !== 'OWNER') {
+    //   filter.actionBy = new Types.ObjectId(userId);
+    // }
 
     return this.scrapInvoiceModel
       .find(filter)

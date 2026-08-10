@@ -109,24 +109,28 @@ export class SalesController {
     required: false,
     enum: ['COMPLETED', 'CANCELLED'],
   })
+  @ApiQuery({ name: 'invoiceNumber', required: false })
   @ApiQuery({
-    name: 'invoiceNumber',
+    name: 'customerName',
     required: false,
-    description: 'البحث برقم فاتورة محدد',
-  })
-  @ApiOperation({
-    summary:
-      'عرض وتتبع كل فواتير مبيعات المحل (المالك يرى الكل، الموظف يرى فواتيره فقط)',
-  })
+    description: 'البحث باسم العميل',
+  }) // 👈 أضف هذه
+  @ApiQuery({
+    name: 'customerPhone',
+    required: false,
+    description: 'البحث برقم هاتف العميل',
+  }) // 👈 أضف هذه
   async getInvoices(
     @Query('status') status?: string,
     @Query('invoiceNumber') invoiceNumber?: string,
+    @Query('customerName') customerName?: string, // 👈 استقبلهم هنا
+    @Query('customerPhone') customerPhone?: string, // 👈 استقبلهم هنا
     @Req() req?: any,
   ) {
     const userId = req.user.id;
     const userRole = req.user.role;
     const invoices = await this.salesService.findAllInvoices(
-      { status, invoiceNumber },
+      { status, invoiceNumber, customerName, customerPhone },
       userId,
       userRole,
     );
