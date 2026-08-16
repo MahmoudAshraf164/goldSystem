@@ -13,8 +13,11 @@ export class StockMovement extends Document {
       'SALE_OUT',
       'INVOICE_UPDATE_RETURN',
       'INVOICE_UPDATE_OUT',
-      'BULLION_IN', // 👈 تم إضافة نوع إدخال السبايك الجديد هنا
-      'BULLION_UPDATE_RETURN', // 👈 تم إضافة نوع تعديل السبايك الجديد هنا
+      'BULLION_IN',
+      'BULLION_SALE_OUT', // 👈 إضافة نوع خروج مبيعات السبايك
+      'BULLION_UPDATE_RETURN',
+      'BULLION_UPDATE_OUT', // 👈 إضافة نوع زيادة كمية السبايك بالتعديل
+      'BULLION_CANCEL_RETURN', // 👈 إضافة نوع إرجاع السبايك عند الإلغاء
     ],
     required: true,
   })

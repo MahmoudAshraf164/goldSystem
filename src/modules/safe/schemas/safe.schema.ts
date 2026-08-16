@@ -13,7 +13,15 @@ export class Safe extends Document {
     type: {
       actionType: {
         type: String,
-        enum: ['INFLOW', 'OUTFLOW', 'MANUAL_ADJUSTMENT', 'RESET'],
+        enum: [
+          'INFLOW',
+          'OUTFLOW',
+          'MANUAL_ADJUSTMENT',
+          'RESET',
+          'BULLION_SALE', // 👈 إدراج نوع بيع السبايك
+          'BULLION_SALE_EDIT', // 👈 إدراج نوع تعديل فاتورة السبايك
+          'BULLION_SALE_CANCEL', // 👈 إدراج نوع إلغاء فاتورة السبايك
+        ],
       },
       amount: { type: Number },
       reason: { type: String },
