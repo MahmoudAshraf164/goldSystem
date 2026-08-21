@@ -6,38 +6,47 @@ export type BarcodeInventoryDocument = BarcodeInventory & Document;
 @Schema({ timestamps: true })
 export class BarcodeInventory {
   @Prop({ required: true, unique: true, index: true })
-  barcode: string; // رمز الباركود الفريد للقطعة مثل JWL-21-0001
+  barcode: string;
 
   @Prop({ required: true })
-  title: string; // اسم القطعة (مثلاً: خاتم لازوردي سوليتير)
+  title: string;
 
   @Prop({ required: true, enum: [18, 21, 24] })
-  karat: number; // العيار (18 / 21 / 24)
+  karat: number;
 
   @Prop({ required: true })
-  grossWeight: number; // الوزن القائم بالجرام (مثال: 4.25)
+  grossWeight: number;
 
   @Prop({ required: true, default: 0.06 })
-  tagWeight: number; // وزن تيكت/جراب المصنع البلاستيك (مثال: 0.06)
+  tagWeight: number;
 
   @Prop({ required: true })
-  netWeight: number; // الوزن الصافي = القائم - وزن التيكت
+  netWeight: number;
 
   @Prop({ required: true, default: 0 })
-  makingChargePerGram: number; // مصنعية الجرام الواحد
+  makingChargePerGram: number;
 
   @Prop({
     required: true,
     enum: ['AVAILABLE', 'SOLD', 'RESERVED'],
     default: 'AVAILABLE',
   })
-  status: string; // حالة القطعة (متاحة / مباعة / محجوزة)
+  status: string;
 
   @Prop({ type: Types.ObjectId, ref: 'Category', required: false })
-  category: Types.ObjectId; // التصنيف (خواتم / سلاسل / غوايش...)
+  category?: Types.ObjectId;
+
+  // 👈 ربط قطعة الباركود بالمخزون العام
+  @Prop({
+    type: Types.ObjectId,
+    ref: 'Inventory',
+    required: false,
+    index: true,
+  })
+  inventoryRef?: Types.ObjectId;
 
   @Prop({ default: '-' })
-  companyName: string; // اسم المورد أو الشركة (مثلاً: لازوردي / إيجيبت جولد)
+  companyName: string;
 
   @Prop({ default: false })
   isArchived: boolean;

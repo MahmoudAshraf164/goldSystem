@@ -14,6 +14,10 @@ import {
   BarcodeInventory,
   BarcodeInventoryDocument,
 } from '../barcode-inventory/schemas/barcode-inventory.schema';
+import {
+  Inventory,
+  InventoryDocument,
+} from '../inventory/schemas/inventory.schema';
 import { CreateBarcodeInvoiceDto } from './dto/create-barcode-invoice.dto';
 import { StockMovementsService } from '../stock-movements/stock-movements.service';
 import { SafeService } from '../safe/safe.service';
@@ -26,6 +30,8 @@ export class BarcodeSalesService {
     private readonly invoiceModel: Model<BarcodeInvoiceDocument>,
     @InjectModel(BarcodeInventory.name)
     private readonly barcodeInventoryModel: Model<BarcodeInventoryDocument>,
+    @InjectModel(Inventory.name)
+    private readonly inventoryModel: Model<InventoryDocument>,
     @InjectConnection() private readonly connection: Connection,
     private readonly movementsService: StockMovementsService,
     private readonly safeService: SafeService,
@@ -38,12 +44,74 @@ export class BarcodeSalesService {
     return `POS-${dateStr}-${(count + 1).toString().padStart(4, '0')}`;
   }
 
-  // 1. إتمام عملية البيع بالباركود مع Transaction وضمان عدم تضارب البيانات
+  /**
+   * دالة مساعدة لتحديث مصفوفة التيكيتات (tagDetails) والمقادير بالمخزون العام عند البيع أو الإرجاع
+   */
+  private async updateParentInventory(
+    inventoryId: Types.ObjectId | string,
+    grossWeight: number,
+    netWeight: number,
+    tagWeight: number,
+    action: 'DEDUCT' | 'RESTORE',
+    session: any,
+  ) {
+    const parentInventory = await this.inventoryModel
+      .findById(inventoryId)
+      .session(session);
+
+    if (!parentInventory) return;
+
+    const countFactor = action === 'DEDUCT' ? -1 : 1;
+
+    // 1. تحديث الأعداد والأوزان الإجمالية
+    parentInventory.currentCount = Math.max(
+      0,
+      parentInventory.currentCount + countFactor,
+    );
+    parentInventory.totalGrossWeight = parseFloat(
+      (parentInventory.totalGrossWeight + grossWeight * countFactor).toFixed(3),
+    );
+    parentInventory.totalNetWeight = parseFloat(
+      (parentInventory.totalNetWeight + netWeight * countFactor).toFixed(3),
+    );
+
+    // 2. تحديث مصفوفة التيكيتات (tagDetails) إن وجد وزن للتيكيت
+    if (
+      tagWeight &&
+      tagWeight > 0 &&
+      Array.isArray(parentInventory.tagDetails)
+    ) {
+      const tagIndex = parentInventory.tagDetails.findIndex(
+        (t) => Math.abs(t.weight - tagWeight) < 0.001,
+      );
+
+      if (action === 'DEDUCT') {
+        if (tagIndex !== -1) {
+          parentInventory.tagDetails[tagIndex].count -= 1;
+          if (parentInventory.tagDetails[tagIndex].count <= 0) {
+            parentInventory.tagDetails.splice(tagIndex, 1);
+          }
+        }
+      } else if (action === 'RESTORE') {
+        if (tagIndex !== -1) {
+          parentInventory.tagDetails[tagIndex].count += 1;
+        } else {
+          parentInventory.tagDetails.push({
+            count: 1,
+            weight: tagWeight,
+          } as any);
+        }
+      }
+    }
+
+    await parentInventory.save({ session });
+  }
+
+  // 1. إتمام عملية البيع بالباركود وخصم البضاعة والتيكيت من المخزون العام
   async createInvoice(
     dto: CreateBarcodeInvoiceDto,
     userId: string,
   ): Promise<BarcodeInvoice> {
-    // ✅ تم تصحيح الاستدعاء إلى findById بدلاً من findOne
     if (dto.customerId) {
       try {
         await this.customersService.findById(dto.customerId);
@@ -100,8 +168,6 @@ export class BarcodeSalesService {
         const totalMakingCharge = parseFloat(
           (item.netWeight * makingCharge).toFixed(2),
         );
-
-        // المعادلة المباشرة: سعر الذهب + سعر المصنعية (بدون خصومات)
         const finalPrice = parseFloat(
           (goldTotalPrice + totalMakingCharge).toFixed(2),
         );
@@ -126,13 +192,27 @@ export class BarcodeSalesService {
           (grandTotalAmount + finalPrice).toFixed(2),
         );
 
-        // تحديث حالة القطعة إلى مباعة SOLD
+        // 🟢 أ) تغيير حالة قطعة الباركود إلى مباعة SOLD
         item.status = 'SOLD';
         await item.save({ session });
 
-        // تسجيل حركة الخروج المالي والمخزني
+        // 🟢 ب) الخصم الفوري للقطعة والتيكيت من المخزون العام الأصلي المربوط بها
+        if (item.inventoryRef) {
+          const tagWeight =
+            (item as any).tagWeight ?? item.grossWeight - item.netWeight;
+          await this.updateParentInventory(
+            item.inventoryRef,
+            item.grossWeight,
+            item.netWeight,
+            tagWeight,
+            'DEDUCT',
+            session,
+          );
+        }
+
+        // 🟢 جـ) تسجيل حركة الخروج في السجل
         await this.movementsService.logMovement({
-          inventoryItem: item._id.toString(),
+          inventoryItem: (item.inventoryRef || item._id).toString(),
           type: 'SALE_OUT',
           countChange: -1,
           grossWeightChange: -item.grossWeight,
@@ -144,7 +224,6 @@ export class BarcodeSalesService {
 
       const invoiceNumber = await this.generateInvoiceNumber();
 
-      // إنشاء وحفظ الفاتورة
       const newInvoice = new this.invoiceModel({
         invoiceNumber,
         items: processedItems,
@@ -158,7 +237,7 @@ export class BarcodeSalesService {
 
       const savedInvoice = await newInvoice.save({ session });
 
-      // ربط وتسميع المبلغ في الخزنة كـ INFLOW أوتوماتيكياً
+      // تحصيل المبلغ للخزنة
       await this.safeService.triggerTransaction(
         savedInvoice.finalPaidAmount,
         'INFLOW',
@@ -177,7 +256,7 @@ export class BarcodeSalesService {
     }
   }
 
-  // 2. جلب جميع فواتير مبيعات الباركود
+  // 2. جلب جميع الفواتير
   async findAllInvoices(): Promise<BarcodeInvoice[]> {
     return this.invoiceModel
       .find({ isCancelled: false })
@@ -187,7 +266,7 @@ export class BarcodeSalesService {
       .exec();
   }
 
-  // 3. جلب تفاصيل فاتورة باركود معينة بالـ ID
+  // 3. جلب تفاصيل فاتورة بالـ ID
   async findInvoiceById(id: string): Promise<BarcodeInvoice> {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('معرف الفاتورة غير صالح');
@@ -206,7 +285,7 @@ export class BarcodeSalesService {
     return invoice;
   }
 
-  // 5. تعديل فاتورة مبيعات بالباركود
+  // 4. تعديل الفاتورة وتعديل التزامن والتيكيتات مع المخزون العام
   async updateInvoice(
     id: string,
     dto: CreateBarcodeInvoiceDto,
@@ -225,7 +304,6 @@ export class BarcodeSalesService {
       throw new BadRequestException('لا يمكن تعديل فاتورة ملغاة');
     }
 
-    // التحقق من العميل الجديد لو اتغير
     if (dto.customerId) {
       try {
         await this.customersService.findById(dto.customerId);
@@ -243,7 +321,7 @@ export class BarcodeSalesService {
       );
       const newBarcodes = new Set(dto.items.map((i) => i.barcode.trim()));
 
-      // 🅰️ القطع التي تم إزالتها من الفاتورة ⬅️ إعادتها للمخزن IN_STOCK
+      // 🟢 إعادة القطع والمأخوذات المحذوفة للتعديل للمخزون العام والتيكيتات
       for (const [barcode, oldItem] of oldItemsMap.entries()) {
         if (!newBarcodes.has(barcode)) {
           const barcodeItem = await this.barcodeInventoryModel
@@ -251,23 +329,39 @@ export class BarcodeSalesService {
             .session(session);
 
           if (barcodeItem) {
-            barcodeItem.status = 'IN_STOCK';
+            barcodeItem.status = 'AVAILABLE';
             await barcodeItem.save({ session });
 
+            if (barcodeItem.inventoryRef) {
+              const tagWeight =
+                (barcodeItem as any).tagWeight ??
+                barcodeItem.grossWeight - barcodeItem.netWeight;
+              await this.updateParentInventory(
+                barcodeItem.inventoryRef,
+                barcodeItem.grossWeight,
+                barcodeItem.netWeight,
+                tagWeight,
+                'RESTORE',
+                session,
+              );
+            }
+
             await this.movementsService.logMovement({
-              inventoryItem: barcodeItem._id.toString(),
-              type: 'INVENTORY_IN',
+              inventoryItem: (
+                barcodeItem.inventoryRef || barcodeItem._id
+              ).toString(),
+              type: 'INVOICE_UPDATE_RETURN',
               countChange: 1,
               grossWeightChange: barcodeItem.grossWeight,
               netWeightChange: barcodeItem.netWeight,
               actionBy: userId,
-              reason: `إزالة القطعة [${barcode}] أثناء تعديل الفاتورة رقم (${existingInvoice.invoiceNumber})`,
+              reason: `إعادة القطعة [${barcode}] للمخزون العام والباركود نتيجة تعديل الفاتورة رقم (${existingInvoice.invoiceNumber})`,
             });
           }
         }
       }
 
-      // 🅱️ معالجة القطع الجديدة / المعدلة
+      // 🟢 معالجة القطع المضافة حديثاً للتعديل
       const processedItems: Array<{
         item: Types.ObjectId;
         barcode: string;
@@ -297,7 +391,6 @@ export class BarcodeSalesService {
           );
         }
 
-        // لو القطعة جديدة على الفاتورة ومباعة لعميل تاني ⬅️ ارمي خطأ
         const wasInOldInvoice = oldItemsMap.has(trimmedBarcode);
         if (!wasInOldInvoice && item.status === 'SOLD') {
           throw new BadRequestException(
@@ -305,23 +398,34 @@ export class BarcodeSalesService {
           );
         }
 
-        // لو كانت قطعة جديدة ⬅️ حول حالتها لـ SOLD وسجل حركة خروج
         if (!wasInOldInvoice) {
           item.status = 'SOLD';
           await item.save({ session });
 
+          if (item.inventoryRef) {
+            const tagWeight =
+              (item as any).tagWeight ?? item.grossWeight - item.netWeight;
+            await this.updateParentInventory(
+              item.inventoryRef,
+              item.grossWeight,
+              item.netWeight,
+              tagWeight,
+              'DEDUCT',
+              session,
+            );
+          }
+
           await this.movementsService.logMovement({
-            inventoryItem: item._id.toString(),
-            type: 'SALE_OUT',
+            inventoryItem: (item.inventoryRef || item._id).toString(),
+            type: 'INVOICE_UPDATE_OUT',
             countChange: -1,
             grossWeightChange: -item.grossWeight,
             netWeightChange: -item.netWeight,
             actionBy: userId,
-            reason: `إضافة قطعة بالباركود [${item.barcode}] أثناء تعديل الفاتورة رقم (${existingInvoice.invoiceNumber})`,
+            reason: `خصم قطعة بالباركود [${item.barcode}] من المخزون العام للتعديل على الفاتورة (${existingInvoice.invoiceNumber})`,
           });
         }
 
-        // حساب الأسعار للقطعة
         const goldPrice = saleItem.goldPricePerGram;
         const makingCharge =
           saleItem.makingChargePerGram ?? item.makingChargePerGram;
@@ -357,20 +461,18 @@ export class BarcodeSalesService {
         );
       }
 
-      // 🅂 تسوية الخزنة بالفرق المالي
+      // التسوية المالية للخزنة
       const oldAmount = existingInvoice.finalPaidAmount;
       const amountDifference = grandTotalAmount - oldAmount;
 
       if (amountDifference > 0) {
-        // العميل دفع زيادة ⬅️ إدخال للخزنة INFLOW
         await this.safeService.triggerTransaction(
           amountDifference,
           'INFLOW',
-          `تحصيل فرق مال إيجابي لتعديل فاتورة باركود رقم (${existingInvoice.invoiceNumber})`,
+          `تحصيل فرق مال لتعديل فاتورة باركود رقم (${existingInvoice.invoiceNumber})`,
           userId,
         );
       } else if (amountDifference < 0) {
-        // نرجع للعميل فرق ⬅️ إخراج من الخزنة OUTFLOW
         await this.safeService.triggerTransaction(
           Math.abs(amountDifference),
           'OUTFLOW',
@@ -379,7 +481,6 @@ export class BarcodeSalesService {
         );
       }
 
-      // 🅹 تحديث بيانات الفاتورة
       existingInvoice.items = processedItems;
       existingInvoice.totalNetWeight = grandTotalNetWeight;
       existingInvoice.finalPaidAmount = grandTotalAmount;
@@ -400,7 +501,7 @@ export class BarcodeSalesService {
     }
   }
 
-  // 4. إلغاء فاتورة واسترجاع النقدية والمخزون
+  // 5. إلغاء فاتورة وإرجاع البضاعة والتيكيتات كاملة للمخزون العام
   async cancelInvoice(id: string, userId: string): Promise<BarcodeInvoice> {
     const invoice = await this.invoiceModel.findById(id);
     if (!invoice) {
@@ -415,29 +516,45 @@ export class BarcodeSalesService {
     session.startTransaction();
 
     try {
-      // 1. إعادة حالة القطع المباعة إلى المخزن IN_STOCK
       for (const itemRef of invoice.items) {
         const barcodeItem = await this.barcodeInventoryModel
           .findById(itemRef.item)
           .session(session);
 
         if (barcodeItem) {
-          barcodeItem.status = 'IN_STOCK';
+          barcodeItem.status = 'AVAILABLE';
           await barcodeItem.save({ session });
 
+          // 🟢 إرجاع القطعة والتيكيت للمخزون العام
+          if (barcodeItem.inventoryRef) {
+            const tagWeight =
+              (barcodeItem as any).tagWeight ??
+              barcodeItem.grossWeight - barcodeItem.netWeight;
+            await this.updateParentInventory(
+              barcodeItem.inventoryRef,
+              barcodeItem.grossWeight,
+              barcodeItem.netWeight,
+              tagWeight,
+              'RESTORE',
+              session,
+            );
+          }
+
           await this.movementsService.logMovement({
-            inventoryItem: barcodeItem._id.toString(),
-            type: 'INVENTORY_IN',
+            inventoryItem: (
+              barcodeItem.inventoryRef || barcodeItem._id
+            ).toString(),
+            type: 'INVOICE_CANCEL_RETURN',
             countChange: 1,
             grossWeightChange: barcodeItem.grossWeight,
             netWeightChange: barcodeItem.netWeight,
             actionBy: userId,
-            reason: `إلغاء فاتورة البيع رقم (${invoice.invoiceNumber}) واسترجاع القطعة للمخزن`,
+            reason: `إرجاع القطعة [${barcodeItem.barcode}] للمخزون العام نتيجة إلغاء الفاتورة رقم (${invoice.invoiceNumber})`,
           });
         }
       }
 
-      // 2. خصم المبلغ المرتجع من الخزنة
+      // خصم المبلغ المرتجع من الخزنة
       await this.safeService.triggerTransaction(
         invoice.finalPaidAmount,
         'OUTFLOW',
@@ -445,7 +562,6 @@ export class BarcodeSalesService {
         userId,
       );
 
-      // 3. تعليم الفاتورة كـ ملغاة
       invoice.isCancelled = true;
       const updatedInvoice = await invoice.save({ session });
 

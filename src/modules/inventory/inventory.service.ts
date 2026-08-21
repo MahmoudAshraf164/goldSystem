@@ -59,6 +59,7 @@ export class InventoryService {
       companyName: cleanedCompanyName,
       currentCount: initialCount,
       initialGrossWeight: totalGrossWeight,
+      totalGrossWeight,
       totalNetWeight,
       tagDetails: tagDetails || [],
     });
@@ -78,7 +79,7 @@ export class InventoryService {
     return savedItem;
   }
 
-  // 2. تزويد كمية/بضاعة إضافية على عنصر موجود (Restock)
+  // 2. تزويد كمية/بضاعة إضافية على عنصر موجود (Restock) مع الدمج التلقائي لـ tagDetails
   async addStock(
     id: string,
     addStockDto: AddStockDto,
@@ -120,16 +121,25 @@ export class InventoryService {
       );
     }
 
-    const updatedTagDetails = [...item.tagDetails];
+    // دمج تفاصيل التيكيت تلقائياً (زيادة الـ count للوزن المماثل أو إضافة وزن جديد)
+    const updatedTagDetails = item.tagDetails.map((t) => ({
+      count: t.count,
+      weight: t.weight,
+    }));
+
     if (tagDetails && tagDetails.length > 0) {
       for (const newTag of tagDetails) {
         const existingTagIndex = updatedTagDetails.findIndex(
-          (t) => t.weight === newTag.weight,
+          (t) =>
+            Number(t.weight.toFixed(3)) === Number(newTag.weight.toFixed(3)),
         );
         if (existingTagIndex > -1) {
           updatedTagDetails[existingTagIndex].count += newTag.count;
         } else {
-          updatedTagDetails.push(newTag);
+          updatedTagDetails.push({
+            count: newTag.count,
+            weight: newTag.weight,
+          });
         }
       }
     }
@@ -233,6 +243,7 @@ export class InventoryService {
           ...updateInventoryDto,
           currentCount: newCurrentCount,
           totalNetWeight: targetNetWeight,
+          tagDetails: targetTagDetails,
         },
         { new: true },
       )

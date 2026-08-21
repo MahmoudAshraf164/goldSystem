@@ -6,7 +6,7 @@ import { ScrapInvoice } from '../scrap-invoices/schemas/scrap-invoice.schema';
 import { Income } from '../income/schemas/income.schema';
 import { Expense } from '../expenses/schemas/expense.schema';
 import { BullionSale } from '../bullion-sales/schemas/bullion-sale.schema';
-import { BarcodeInvoice } from '../barcode-sales/schemas/barcode-invoice.schema'; // 👈 استيراد موديل فواتير الباركود
+import { BarcodeInvoice } from '../barcode-sales/schemas/barcode-invoice.schema';
 
 @Injectable()
 export class DailyLedgerService {
@@ -19,7 +19,7 @@ export class DailyLedgerService {
     @InjectModel(BullionSale.name)
     private readonly bullionSaleModel: Model<BullionSale>,
     @InjectModel(BarcodeInvoice.name)
-    private readonly barcodeInvoiceModel: Model<BarcodeInvoice>, // 👈 حقن موديل مبيعات الباركود
+    private readonly barcodeInvoiceModel: Model<BarcodeInvoice>,
   ) {}
 
   async getLedgerReport() {
@@ -53,12 +53,7 @@ export class DailyLedgerService {
       end,
       'COMPLETED',
     );
-    const barcodeGoldCash = await this.getCash(
-      this.barcodeInvoiceModel,
-      start,
-      end,
-      'COMPLETED',
-    ); // 👈 حساب كاش مبيعات الباركود
+    const barcodeGoldCash = await this.getBarcodeCash(start, end); // 👈 تم تخصيص دالة محددة بحقول الباركود Corrected
     const bullionGoldCash = await this.getCash(
       this.bullionSaleModel,
       start,
@@ -73,7 +68,7 @@ export class DailyLedgerService {
     const extraIncomes = await this.getCash(this.incomeModel, start, end);
     const expenses = await this.getCash(this.expenseModel, start, end);
 
-    // إجمالي الكاش الوارد (دمج كاش المبيعات المجمعة والباركود والسبايك والواردات)
+    // إجمالي الكاش الوارد
     const totalInflow = parseFloat(
       (
         newGoldCash +
@@ -85,14 +80,14 @@ export class DailyLedgerService {
     );
     const netCashflow = parseFloat((totalInflow - expenses).toFixed(2));
 
-    // 2. حساب أوزان جرامات المشغولات والباركود والسبايك المدمجة
+    // 2. حساب أوزان جرامات المشغولات والباركود والسبايك
     const weights = await this.getWeights(start, end);
 
     return {
       period: { start, end },
       financials: {
         newGoldSalesCash: newGoldCash,
-        barcodeGoldSalesCash: barcodeGoldCash, // 👈 كاش الباركود للفرونت إند
+        barcodeGoldSalesCash: barcodeGoldCash,
         bullionGoldSalesCash: bullionGoldCash,
         scrapGoldSalesCash: scrapGoldCash,
         extraIncomesCash: extraIncomes,
@@ -102,6 +97,25 @@ export class DailyLedgerService {
       },
       goldWeights: weights,
     };
+  }
+
+  // دالة مخصصة لاحتساب كاش فواتير الباركود بناء على finalPaidAmount و isCancelled
+  private async getBarcodeCash(start: Date, end: Date): Promise<number> {
+    const result = await this.barcodeInvoiceModel.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: start, $lte: end },
+          isCancelled: { $ne: true }, // استبعاد الفواتير الملغاة
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          total: { $sum: '$finalPaidAmount' }, // 👈 استخدام finalPaidAmount الصحيح
+        },
+      },
+    ]);
+    return result[0]?.total || 0;
   }
 
   private async getCash(
@@ -130,9 +144,8 @@ export class DailyLedgerService {
             $sum:
               model.modelName === 'Expense' || model.modelName === 'Income'
                 ? '$amount'
-                : model.modelName === 'BullionSale' ||
-                    model.modelName === 'BarcodeInvoice'
-                  ? '$grandTotal' // 👈 السبايك والباركود تعتمد على grandTotal
+                : model.modelName === 'BullionSale'
+                  ? '$grandTotal'
                   : '$totalPrice',
           },
         },
@@ -142,7 +155,7 @@ export class DailyLedgerService {
   }
 
   private async getWeights(start: Date, end: Date) {
-    // 1. تقرير المشغولات الذهبية الجديدة المجمعة (القديمة)
+    // 1. تقرير المشغولات الذهبية الجديدة المجمعة
     const newGoldReport = await this.newInvoiceModel.aggregate([
       {
         $match: { createdAt: { $gte: start, $lte: end }, status: 'COMPLETED' },
@@ -165,16 +178,19 @@ export class DailyLedgerService {
       },
     ]);
 
-    // 2. تقرير مبيعات قطع الباركود التجزئة (الجديد)
+    // 2. تقرير مبيعات قطع الباركود التجزئة (تحديث التصفية والحقول)
     const barcodeGoldReport = await this.barcodeInvoiceModel.aggregate([
       {
-        $match: { createdAt: { $gte: start, $lte: end }, status: 'COMPLETED' },
+        $match: {
+          createdAt: { $gte: start, $lte: end },
+          isCancelled: { $ne: true }, // 👈 استبدال status بـ isCancelled
+        },
       },
       { $unwind: '$items' },
       {
         $group: {
           _id: '$items.karat',
-          totalWeight: { $sum: '$items.weight' },
+          totalWeight: { $sum: '$items.netWeight' }, // 👈 استخدام netWeight بدلاً من weight
         },
       },
     ]);
@@ -195,7 +211,7 @@ export class DailyLedgerService {
       },
     ]);
 
-    // 4. تقرير الذهب الكسر (الشراء من العملاء)
+    // 4. تقرير الذهب الكسر
     const scrapGoldReport = await this.scrapInvoiceModel.aggregate([
       {
         $match: {
@@ -221,20 +237,20 @@ export class DailyLedgerService {
             getWeightByKarat(barcodeGoldReport, 24) +
             getWeightByKarat(bullionGoldReport, 24)
           ).toFixed(3),
-        ), // 👈 دمج المشغولات المجمعة + قطع الباركود + السبايك عيار 24
+        ),
         karat21: parseFloat(
           (
             getWeightByKarat(newGoldReport, 21) +
             getWeightByKarat(barcodeGoldReport, 21) +
             getWeightByKarat(bullionGoldReport, 21)
           ).toFixed(3),
-        ), // 👈 دمج المشغولات المجمعة + قطع الباركود + الجنيهات عيار 21
+        ),
         karat18: parseFloat(
           (
             getWeightByKarat(newGoldReport, 18) +
             getWeightByKarat(barcodeGoldReport, 18)
           ).toFixed(3),
-        ), // 👈 دمج المشغولات والباركود عيار 18
+        ),
       },
       scrapGoldPurchasesGrams: {
         karat24: parseFloat(getWeightByKarat(scrapGoldReport, 24).toFixed(3)),

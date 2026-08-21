@@ -36,7 +36,7 @@ export class CreateBarcodeItemDto {
   karat: number;
 
   @ApiProperty({
-    description: 'الوزن القائم (الإجمالي) بالجرام شامل التاج أو الفصوص',
+    description: 'الوزن القائم (الإجمالي) بالجرام شامل التاج',
     example: 5.45,
   })
   @IsNumber()
@@ -44,7 +44,7 @@ export class CreateBarcodeItemDto {
   grossWeight: number;
 
   @ApiPropertyOptional({
-    description: 'وزن التاج / الكارت / الخيط المخصوم بالجرام (إن وجد)',
+    description: 'وزن التاج المخصوم بالجرام',
     example: 0.12,
     default: 0,
   })
@@ -53,21 +53,24 @@ export class CreateBarcodeItemDto {
   @Min(0)
   tagWeight?: number;
 
-  @ApiProperty({
-    description: 'مصنعية الجرام الواحد للقطعة بالعملة المحلية',
-    example: 150.0,
-  })
+  @ApiProperty({ description: 'مصنعية الجرام الواحد للقطعة', example: 150.0 })
   @IsNumber()
   @Min(0)
   makingChargePerGram: number;
 
   @ApiPropertyOptional({
     description: 'معرف التصنيف / الفئة التابعة لها القطعة',
-    example: '60d5ecb8b5c9c22b4c8b4567',
   })
   @IsOptional()
   @IsString()
   category?: string;
+
+  @ApiPropertyOptional({
+    description: 'معرف عنصر المخزون العام المربوط مباشرة (اختياري)',
+  })
+  @IsOptional()
+  @IsString()
+  inventoryId?: string;
 
   @ApiPropertyOptional({
     description: 'اسم الشركة أو المورد / المصنع للقطعة',

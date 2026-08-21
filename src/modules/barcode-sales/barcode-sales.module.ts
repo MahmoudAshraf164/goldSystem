@@ -9,7 +9,8 @@ import {
 import { BarcodeInventoryModule } from '../barcode-inventory/barcode-inventory.module';
 import { StockMovementsModule } from '../stock-movements/stock-movements.module';
 import { SafeModule } from '../safe/safe.module';
-import { CustomersModule } from '../customers/customers.module'; // 👈 1. استيراد موديل العملاء
+import { CustomersModule } from '../customers/customers.module';
+import { InventoryModule } from '../inventory/inventory.module';
 
 @Module({
   imports: [
@@ -19,7 +20,8 @@ import { CustomersModule } from '../customers/customers.module'; // 👈 1. اس
     BarcodeInventoryModule,
     StockMovementsModule,
     SafeModule,
-    CustomersModule, // 👈 2. إضافته هنا لتوفير Mongoose Model الخاص بالـ Customer للـ Populate
+    CustomersModule,
+    InventoryModule, // 👈 تم استيراد موديل المخزون العام للسماح بتسجيل الحركة والتزامن
   ],
   controllers: [BarcodeSalesController],
   providers: [BarcodeSalesService],
