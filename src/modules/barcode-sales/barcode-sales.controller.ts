@@ -21,15 +21,19 @@ import {
 import { BarcodeSalesService } from './barcode-sales.service';
 import { CreateBarcodeInvoiceDto } from './dto/create-barcode-invoice.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { Role } from '../../common/enums/role.enum';
 
 @ApiTags('مبيعات الباركود بالفواتير (Barcode Sales & Invoices)')
-@ApiBearerAuth()
-@UseGuards(AuthGuard)
+@ApiBearerAuth('access-token')
+@UseGuards(AuthGuard, RolesGuard)
 @Controller('barcode-sales')
 export class BarcodeSalesController {
   constructor(private readonly barcodeSalesService: BarcodeSalesService) {}
 
   @Post('checkout')
+  @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
     summary: 'إتمام عملية بيع بالباركود وإصدار فاتورة',
     description:
@@ -49,6 +53,7 @@ export class BarcodeSalesController {
   }
 
   @Get('invoices')
+  @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
     summary: 'جلب جميع فواتير مبيعات الباركود',
     description:
@@ -60,6 +65,7 @@ export class BarcodeSalesController {
   }
 
   @Get('invoices/:id')
+  @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
     summary: 'جلب تفاصيل فاتورة بيع بالباركود بواسطة الـ ID',
     description:
@@ -78,6 +84,7 @@ export class BarcodeSalesController {
   }
 
   @Patch('invoices/:id/cancel')
+  @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
     summary: 'إلغاء فاتورة بيع واسترجاع المخزون والنقدية',
     description:

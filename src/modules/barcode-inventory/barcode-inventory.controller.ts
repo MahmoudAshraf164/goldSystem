@@ -25,10 +25,11 @@ import {
 import { BarcodeInventoryService } from './barcode-inventory.service';
 import { CreateBarcodeItemDto } from './dto/create-barcode-item.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
 
 @ApiTags('مخزون الباركود (Barcode Inventory)')
-@ApiBearerAuth()
-@UseGuards(AuthGuard)
+@ApiBearerAuth('access-token')
+@UseGuards(AuthGuard, RolesGuard)
 @Controller('barcode-inventory')
 export class BarcodeInventoryController {
   constructor(
