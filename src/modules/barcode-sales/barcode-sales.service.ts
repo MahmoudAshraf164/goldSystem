@@ -26,7 +26,7 @@ export class BarcodeSalesService {
     private readonly invoiceModel: Model<BarcodeInvoiceDocument>,
     @InjectModel(BarcodeInventory.name)
     private readonly barcodeInventoryModel: Model<BarcodeInventoryDocument>,
-    @InjectConnection() private readonly connection: Connection, // 👈 لدعم المجموعات والـ Transactions
+    @InjectConnection() private readonly connection: Connection,
     private readonly movementsService: StockMovementsService,
     private readonly safeService: SafeService,
     private readonly customersService: CustomersService,
@@ -43,12 +43,11 @@ export class BarcodeSalesService {
     dto: CreateBarcodeInvoiceDto,
     userId: string,
   ): Promise<BarcodeInvoice> {
-    // التحقق من وجود العميل إذا تم إرساله
+    // ✅ تم تصحيح الاستدعاء إلى findById بدلاً من findOne
     if (dto.customerId) {
-      const customerExists = await this.customersService.findOne(
-        dto.customerId,
-      );
-      if (!customerExists) {
+      try {
+        await this.customersService.findById(dto.customerId);
+      } catch (error) {
         throw new NotFoundException('العميل المحدد غير موجود بالنظام');
       }
     }
@@ -74,7 +73,6 @@ export class BarcodeSalesService {
       let grandTotalAmount = 0;
 
       for (const saleItem of dto.items) {
-        // البحث عن القطعة وتأكيد وجودها وحالتها داخل الجلسة
         const item = await this.barcodeInventoryModel
           .findOne({ barcode: saleItem.barcode.trim(), isArchived: false })
           .session(session)
@@ -92,7 +90,6 @@ export class BarcodeSalesService {
           );
         }
 
-        // الحسابات المالية الدقيقة لكل قطعة
         const goldPrice = saleItem.goldPricePerGram;
         const makingCharge =
           saleItem.makingChargePerGram ?? item.makingChargePerGram;
@@ -103,10 +100,10 @@ export class BarcodeSalesService {
         const totalMakingCharge = parseFloat(
           (item.netWeight * makingCharge).toFixed(2),
         );
-        const itemDiscount = saleItem.customDiscount || 0;
 
+        // المعادلة المباشرة: سعر الذهب + سعر المصنعية (بدون خصومات)
         const finalPrice = parseFloat(
-          (goldTotalPrice + totalMakingCharge - itemDiscount).toFixed(2),
+          (goldTotalPrice + totalMakingCharge).toFixed(2),
         );
 
         processedItems.push({
@@ -145,17 +142,6 @@ export class BarcodeSalesService {
         });
       }
 
-      const discount = dto.discount || 0;
-      const finalPaidAmount = parseFloat(
-        (grandTotalAmount - discount).toFixed(2),
-      );
-
-      if (finalPaidAmount < 0) {
-        throw new BadRequestException(
-          'إجمالي المبلغ المدفوع لا يمكن أن يكون بالسالب',
-        );
-      }
-
       const invoiceNumber = await this.generateInvoiceNumber();
 
       // إنشاء وحفظ الفاتورة
@@ -163,13 +149,10 @@ export class BarcodeSalesService {
         invoiceNumber,
         items: processedItems,
         totalNetWeight: grandTotalNetWeight,
-        totalAmount: grandTotalAmount,
-        discount,
-        finalPaidAmount,
+        finalPaidAmount: grandTotalAmount,
         customer: dto.customerId
           ? new Types.ObjectId(dto.customerId)
           : undefined,
-        paymentMethod: dto.paymentMethod || 'CASH',
         createdBy: new Types.ObjectId(userId),
       });
 
@@ -183,13 +166,11 @@ export class BarcodeSalesService {
         userId,
       );
 
-      // تأكيد وإغلاق الجلسة بنجاح
       await session.commitTransaction();
       session.endSession();
 
       return savedInvoice;
     } catch (error) {
-      // إرجاع القاعدة وتراجع البيانات في حال وجود أي مشكلة
       await session.abortTransaction();
       session.endSession();
       throw error;
@@ -201,7 +182,7 @@ export class BarcodeSalesService {
     return this.invoiceModel
       .find({ isCancelled: false })
       .populate('createdBy', 'name')
-      .populate('customer', 'name phone')
+      .populate('customer', 'fullName phoneNumber')
       .sort({ createdAt: -1 })
       .exec();
   }
@@ -215,7 +196,7 @@ export class BarcodeSalesService {
     const invoice = await this.invoiceModel
       .findById(id)
       .populate('createdBy', 'name')
-      .populate('customer', 'name phone')
+      .populate('customer', 'fullName phoneNumber')
       .exec();
 
     if (!invoice) {
@@ -223,6 +204,200 @@ export class BarcodeSalesService {
     }
 
     return invoice;
+  }
+
+  // 5. تعديل فاتورة مبيعات بالباركود
+  async updateInvoice(
+    id: string,
+    dto: CreateBarcodeInvoiceDto,
+    userId: string,
+  ): Promise<BarcodeInvoice> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('معرف الفاتورة غير صالح');
+    }
+
+    const existingInvoice = await this.invoiceModel.findById(id);
+    if (!existingInvoice) {
+      throw new NotFoundException('الفاتورة غير موجودة');
+    }
+
+    if (existingInvoice.isCancelled) {
+      throw new BadRequestException('لا يمكن تعديل فاتورة ملغاة');
+    }
+
+    // التحقق من العميل الجديد لو اتغير
+    if (dto.customerId) {
+      try {
+        await this.customersService.findById(dto.customerId);
+      } catch (error) {
+        throw new NotFoundException('العميل المحدد غير موجود بالنظام');
+      }
+    }
+
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      const oldItemsMap = new Map(
+        existingInvoice.items.map((i) => [i.barcode, i]),
+      );
+      const newBarcodes = new Set(dto.items.map((i) => i.barcode.trim()));
+
+      // 🅰️ القطع التي تم إزالتها من الفاتورة ⬅️ إعادتها للمخزن IN_STOCK
+      for (const [barcode, oldItem] of oldItemsMap.entries()) {
+        if (!newBarcodes.has(barcode)) {
+          const barcodeItem = await this.barcodeInventoryModel
+            .findById(oldItem.item)
+            .session(session);
+
+          if (barcodeItem) {
+            barcodeItem.status = 'IN_STOCK';
+            await barcodeItem.save({ session });
+
+            await this.movementsService.logMovement({
+              inventoryItem: barcodeItem._id.toString(),
+              type: 'INVENTORY_IN',
+              countChange: 1,
+              grossWeightChange: barcodeItem.grossWeight,
+              netWeightChange: barcodeItem.netWeight,
+              actionBy: userId,
+              reason: `إزالة القطعة [${barcode}] أثناء تعديل الفاتورة رقم (${existingInvoice.invoiceNumber})`,
+            });
+          }
+        }
+      }
+
+      // 🅱️ معالجة القطع الجديدة / المعدلة
+      const processedItems: Array<{
+        item: Types.ObjectId;
+        barcode: string;
+        title: string;
+        karat: number;
+        netWeight: number;
+        goldPricePerGram: number;
+        goldTotalPrice: number;
+        makingChargePerGram: number;
+        totalMakingCharge: number;
+        finalPrice: number;
+      }> = [];
+
+      let grandTotalNetWeight = 0;
+      let grandTotalAmount = 0;
+
+      for (const saleItem of dto.items) {
+        const trimmedBarcode = saleItem.barcode.trim();
+        const item = await this.barcodeInventoryModel
+          .findOne({ barcode: trimmedBarcode, isArchived: false })
+          .session(session)
+          .exec();
+
+        if (!item) {
+          throw new NotFoundException(
+            `القطعة ذات الباركود (${trimmedBarcode}) غير موجودة بالمخزن`,
+          );
+        }
+
+        // لو القطعة جديدة على الفاتورة ومباعة لعميل تاني ⬅️ ارمي خطأ
+        const wasInOldInvoice = oldItemsMap.has(trimmedBarcode);
+        if (!wasInOldInvoice && item.status === 'SOLD') {
+          throw new BadRequestException(
+            `القطعة [${item.title}] ذات الباركود (${item.barcode}) مباعة بالفعل!`,
+          );
+        }
+
+        // لو كانت قطعة جديدة ⬅️ حول حالتها لـ SOLD وسجل حركة خروج
+        if (!wasInOldInvoice) {
+          item.status = 'SOLD';
+          await item.save({ session });
+
+          await this.movementsService.logMovement({
+            inventoryItem: item._id.toString(),
+            type: 'SALE_OUT',
+            countChange: -1,
+            grossWeightChange: -item.grossWeight,
+            netWeightChange: -item.netWeight,
+            actionBy: userId,
+            reason: `إضافة قطعة بالباركود [${item.barcode}] أثناء تعديل الفاتورة رقم (${existingInvoice.invoiceNumber})`,
+          });
+        }
+
+        // حساب الأسعار للقطعة
+        const goldPrice = saleItem.goldPricePerGram;
+        const makingCharge =
+          saleItem.makingChargePerGram ?? item.makingChargePerGram;
+
+        const goldTotalPrice = parseFloat(
+          (item.netWeight * goldPrice).toFixed(2),
+        );
+        const totalMakingCharge = parseFloat(
+          (item.netWeight * makingCharge).toFixed(2),
+        );
+        const finalPrice = parseFloat(
+          (goldTotalPrice + totalMakingCharge).toFixed(2),
+        );
+
+        processedItems.push({
+          item: item._id as Types.ObjectId,
+          barcode: item.barcode,
+          title: item.title,
+          karat: item.karat,
+          netWeight: item.netWeight,
+          goldPricePerGram: goldPrice,
+          goldTotalPrice,
+          makingChargePerGram: makingCharge,
+          totalMakingCharge,
+          finalPrice,
+        });
+
+        grandTotalNetWeight = parseFloat(
+          (grandTotalNetWeight + item.netWeight).toFixed(3),
+        );
+        grandTotalAmount = parseFloat(
+          (grandTotalAmount + finalPrice).toFixed(2),
+        );
+      }
+
+      // 🅂 تسوية الخزنة بالفرق المالي
+      const oldAmount = existingInvoice.finalPaidAmount;
+      const amountDifference = grandTotalAmount - oldAmount;
+
+      if (amountDifference > 0) {
+        // العميل دفع زيادة ⬅️ إدخال للخزنة INFLOW
+        await this.safeService.triggerTransaction(
+          amountDifference,
+          'INFLOW',
+          `تحصيل فرق مال إيجابي لتعديل فاتورة باركود رقم (${existingInvoice.invoiceNumber})`,
+          userId,
+        );
+      } else if (amountDifference < 0) {
+        // نرجع للعميل فرق ⬅️ إخراج من الخزنة OUTFLOW
+        await this.safeService.triggerTransaction(
+          Math.abs(amountDifference),
+          'OUTFLOW',
+          `إرجاع فرق مال للعميل لتعديل فاتورة باركود رقم (${existingInvoice.invoiceNumber})`,
+          userId,
+        );
+      }
+
+      // 🅹 تحديث بيانات الفاتورة
+      existingInvoice.items = processedItems;
+      existingInvoice.totalNetWeight = grandTotalNetWeight;
+      existingInvoice.finalPaidAmount = grandTotalAmount;
+      existingInvoice.customer = dto.customerId
+        ? new Types.ObjectId(dto.customerId)
+        : undefined;
+
+      const updatedInvoice = await existingInvoice.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return updatedInvoice;
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
   }
 
   // 4. إلغاء فاتورة واسترجاع النقدية والمخزون
@@ -270,7 +445,7 @@ export class BarcodeSalesService {
         userId,
       );
 
-      // 3. علام الفاتورة كـ ملغاة
+      // 3. تعليم الفاتورة كـ ملغاة
       invoice.isCancelled = true;
       const updatedInvoice = await invoice.save({ session });
 

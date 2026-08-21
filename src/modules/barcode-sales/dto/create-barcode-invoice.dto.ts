@@ -28,23 +28,13 @@ export class BarcodeSaleItemDto {
 
   @ApiPropertyOptional({
     description:
-      'مصنعية الجرام للقطعة (اختياري: إن لم تُرسل تُحسب المصنعية المسجلة بالقطعة)',
+      'مصنعية الجرام للقطعة (اختياري: إن لم تُرسل تُحسب المصنعية المسجلة بالقطعة في المخزن)',
     example: 180.0,
   })
   @IsOptional()
   @IsNumber()
   @Min(0)
   makingChargePerGram?: number;
-
-  @ApiPropertyOptional({
-    description: 'خصم مخصص على القطعة إن وجد',
-    example: 50.0,
-    default: 0,
-  })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  customDiscount?: number;
 }
 
 export class CreateBarcodeInvoiceDto {
@@ -60,29 +50,10 @@ export class CreateBarcodeInvoiceDto {
   items: BarcodeSaleItemDto[];
 
   @ApiPropertyOptional({
-    description: 'خصم إضافي كلي على إجمالي الفاتورة',
-    example: 100.0,
-    default: 0,
-  })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  discount?: number;
-
-  @ApiPropertyOptional({
     description: 'معرف العميل (ObjectId) المربوط بالفاتورة (اختياري)',
     example: '60d5ecb8b5c9c22b4c8b9999',
   })
   @IsOptional()
   @IsString()
   customerId?: string;
-
-  @ApiPropertyOptional({
-    description: 'طريقة الدفع (CASH / CARD / TRANSFER)',
-    example: 'CASH',
-    default: 'CASH',
-  })
-  @IsOptional()
-  @IsString()
-  paymentMethod?: string;
 }

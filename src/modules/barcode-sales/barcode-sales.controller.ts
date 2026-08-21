@@ -64,6 +64,32 @@ export class BarcodeSalesController {
     return this.barcodeSalesService.findAllInvoices();
   }
 
+  @Patch('invoices/:id')
+  @Roles(Role.OWNER, Role.Employee)
+  @ApiOperation({
+    summary: 'تعديل فاتورة بيع بالباركود قائمة',
+    description:
+      'تعديل أسعار الجرام أو المصنعيات أو إضافة/حذف قطع من الفاتورة مع التسوية الآلية للمخزون والخزنة وحركات المخزن.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'معرف الفاتورة (MongoDB ObjectId)',
+    example: '60d5ecb8b5c9c22b4c8b8888',
+  })
+  @ApiOkResponse({ description: 'تم تعديل الفاتورة بنجاح' })
+  @ApiBadRequestResponse({
+    description: 'البيانات غير صالحة أو الفاتورة ملغاة',
+  })
+  @ApiNotFoundResponse({ description: 'الفاتورة أو القطع غير موجودة' })
+  async updateInvoice(
+    @Param('id') id: string,
+    @Body() dto: CreateBarcodeInvoiceDto,
+    @Request() req: any,
+  ) {
+    const userId = req.user?.userId || req.user?.sub;
+    return this.barcodeSalesService.updateInvoice(id, dto, userId);
+  }
+
   @Get('invoices/:id')
   @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({

@@ -12,7 +12,6 @@ import { Invoice } from '../sales/schemas/invoice.schema';
 
 @Injectable()
 export class CustomersService {
-  findOne: any;
   constructor(
     @InjectModel(Customer.name) public readonly customerModel: Model<Customer>,
     @InjectModel(Invoice.name) private readonly invoiceModel: Model<Invoice>,

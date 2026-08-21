@@ -11,13 +11,14 @@ export class StockMovement extends Document {
     enum: [
       'INVENTORY_IN',
       'SALE_OUT',
-      'INVOICE_UPDATE_RETURN',
-      'INVOICE_UPDATE_OUT',
+      'INVOICE_CANCEL_RETURN', // 👈 إضافة نوع إرجاع الباركود عند إلغاء الفاتورة
+      'INVOICE_UPDATE_RETURN', // 👈 إرجاع قطعة للمخزن عند تعديل الفاتورة
+      'INVOICE_UPDATE_OUT', // 👈 خروج قطعة جديدة عند تعديل الفاتورة
       'BULLION_IN',
-      'BULLION_SALE_OUT', // 👈 إضافة نوع خروج مبيعات السبايك
+      'BULLION_SALE_OUT',
       'BULLION_UPDATE_RETURN',
-      'BULLION_UPDATE_OUT', // 👈 إضافة نوع زيادة كمية السبايك بالتعديل
-      'BULLION_CANCEL_RETURN', // 👈 إضافة نوع إرجاع السبايك عند الإلغاء
+      'BULLION_UPDATE_OUT',
+      'BULLION_CANCEL_RETURN',
     ],
     required: true,
   })

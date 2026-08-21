@@ -42,7 +42,7 @@ export const BarcodeInvoiceItemSchema =
 @Schema({ timestamps: true })
 export class BarcodeInvoice {
   @Prop({ required: true, unique: true, index: true })
-  invoiceNumber: string; // رقم الفاتورة مثل: INV-2026-0001
+  invoiceNumber: string; // رقم الفاتورة التلقائي مثل: POS-20260821-0001
 
   @Prop({ type: [BarcodeInvoiceItemSchema], required: true })
   items: BarcodeInvoiceItem[];
@@ -51,19 +51,10 @@ export class BarcodeInvoice {
   totalNetWeight: number; // إجمالي الوزن الصافي المباع
 
   @Prop({ required: true, default: 0 })
-  totalAmount: number; // إجمالي المبلغ المطلوب
-
-  @Prop({ required: true, default: 0 })
-  discount: number; // خصم إضافي على الفاتورة
-
-  @Prop({ required: true, default: 0 })
-  finalPaidAmount: number; // الصافي النهائي بعد الخصم
+  finalPaidAmount: number; // إجمالي المبلغ المطلوب والمدفوع كاملاً
 
   @Prop({ type: Types.ObjectId, ref: 'Customer', required: false })
-  customer: Types.ObjectId; // العميل (اختياري)
-
-  @Prop({ default: 'CASH' })
-  paymentMethod: string; // طريقة الدفع (كاش / شبكة / تحويل)
+  customer?: Types.ObjectId; // العميل (اختياري)
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   createdBy: Types.ObjectId; // الموظف البائع
