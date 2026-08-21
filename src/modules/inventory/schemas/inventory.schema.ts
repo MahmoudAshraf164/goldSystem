@@ -1,6 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { Document, Types } from 'mongoose';
 
+export type InventoryDocument = Inventory & Document;
+
 @Schema()
 export class TagDetail {
   @Prop({ type: Number, required: true, min: 0 })
@@ -9,6 +11,8 @@ export class TagDetail {
   @Prop({ type: Number, required: true, min: 0 })
   weight: number;
 }
+
+export const TagDetailSchema = SchemaFactory.createForClass(TagDetail);
 
 @Schema({ timestamps: true })
 export class Inventory extends Document {
@@ -27,7 +31,6 @@ export class Inventory extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Category', required: true, index: true })
   category: Types.ObjectId;
 
-  // 🛠️ تحديث الـ enum ليشمل عيار 24
   @Prop({ type: Number, required: true, enum: [18, 21, 24], index: true })
   karat: number;
 
@@ -46,7 +49,7 @@ export class Inventory extends Document {
   @Prop({ type: Number, required: true, min: 0 })
   totalNetWeight: number;
 
-  @Prop({ type: [TagDetail], default: [] })
+  @Prop({ type: [TagDetailSchema], default: [] })
   tagDetails: TagDetail[];
 
   @Prop({ type: Boolean, default: false, index: true })

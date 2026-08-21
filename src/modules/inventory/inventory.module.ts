@@ -3,14 +3,14 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { InventoryService } from './inventory.service';
 import { InventoryController } from './inventory.controller';
 import { Inventory, InventorySchema } from './schemas/inventory.schema';
-import { StockMovementsModule } from '../stock-movements/stock-movements.module'; // 👈 استيراد الموديول الجديد هنا
+import { StockMovementsModule } from '../stock-movements/stock-movements.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Inventory.name, schema: InventorySchema },
     ]),
-    StockMovementsModule, // 👈 ضيف الموديول هنا عشان الـ InventoryService يقدر يشوف الـ StockMovementsService
+    StockMovementsModule,
   ],
   controllers: [InventoryController],
   providers: [InventoryService],

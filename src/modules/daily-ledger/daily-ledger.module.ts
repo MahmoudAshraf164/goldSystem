@@ -12,7 +12,11 @@ import { Expense, ExpenseSchema } from '../expenses/schemas/expense.schema';
 import {
   BullionSale,
   BullionSaleSchema,
-} from '../bullion-sales/schemas/bullion-sale.schema'; // 👈 استيراد موديل السبايك
+} from '../bullion-sales/schemas/bullion-sale.schema';
+import {
+  BarcodeInvoice,
+  BarcodeInvoiceSchema,
+} from '../barcode-sales/schemas/barcode-invoice.schema'; // 👈 استيراد النموذج
 
 @Module({
   imports: [
@@ -21,7 +25,8 @@ import {
       { name: ScrapInvoice.name, schema: ScrapInvoiceSchema },
       { name: Income.name, schema: IncomeSchema },
       { name: Expense.name, schema: ExpenseSchema },
-      { name: BullionSale.name, schema: BullionSaleSchema }, // 👈 تسجيل الموديل هنا
+      { name: BullionSale.name, schema: BullionSaleSchema },
+      { name: BarcodeInvoice.name, schema: BarcodeInvoiceSchema }, // 👈 تسجيل الموديل هنا
     ]),
   ],
   controllers: [DailyLedgerController],

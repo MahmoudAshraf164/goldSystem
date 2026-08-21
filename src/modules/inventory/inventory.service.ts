@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { Inventory } from './schemas/inventory.schema';
+import { Inventory, InventoryDocument } from './schemas/inventory.schema';
 import { CreateInventoryDto } from './dto/create-inventory.dto';
 import { AddStockDto } from './dto/add-stock.dto';
 import { StockMovementsService } from '../stock-movements/stock-movements.service';
@@ -14,7 +14,7 @@ import { StockMovementsService } from '../stock-movements/stock-movements.servic
 export class InventoryService {
   constructor(
     @InjectModel(Inventory.name)
-    public readonly inventoryModel: Model<Inventory>,
+    public readonly inventoryModel: Model<InventoryDocument>,
     private readonly movementsService: StockMovementsService,
   ) {}
 
@@ -22,7 +22,7 @@ export class InventoryService {
   async create(
     createInventoryDto: CreateInventoryDto,
     userId: string,
-  ): Promise<Inventory> {
+  ): Promise<InventoryDocument> {
     const { initialCount, totalGrossWeight, title, companyName, tagDetails } =
       createInventoryDto;
 
@@ -51,9 +51,12 @@ export class InventoryService {
       );
     }
 
+    const cleanedCompanyName =
+      companyName && companyName.trim() !== '' ? companyName.trim() : '-';
+
     const newInventory = new this.inventoryModel({
       ...createInventoryDto,
-      companyName: companyName && companyName.trim() !== '' ? companyName : '-',
+      companyName: cleanedCompanyName,
       currentCount: initialCount,
       initialGrossWeight: totalGrossWeight,
       totalNetWeight,
@@ -80,7 +83,7 @@ export class InventoryService {
     id: string,
     addStockDto: AddStockDto,
     userId: string,
-  ): Promise<Inventory> {
+  ): Promise<InventoryDocument> {
     const { count, grossWeight, tagDetails } = addStockDto;
 
     const item = await this.inventoryModel
@@ -170,12 +173,17 @@ export class InventoryService {
     id: string,
     updateInventoryDto: any,
     userId: string,
-  ): Promise<Inventory> {
+  ): Promise<InventoryDocument> {
     const oldItem = await this.inventoryModel
       .findOne({ _id: id, isArchived: false })
       .exec();
     if (!oldItem)
       throw new NotFoundException('مجموعة الذهب المطلوبة غير موجودة أو مؤرشفة');
+
+    if (updateInventoryDto.companyName !== undefined) {
+      updateInventoryDto.companyName =
+        updateInventoryDto.companyName.trim() || '-';
+    }
 
     const targetInitialCount =
       updateInventoryDto.initialCount !== undefined
@@ -255,7 +263,7 @@ export class InventoryService {
     status: string = 'ACTIVE',
     karat?: number,
     companyName?: string,
-  ): Promise<Inventory[]> {
+  ): Promise<InventoryDocument[]> {
     const isArchivedQuery = status.toUpperCase() === 'ARCHIVED';
     const filter: any = { isArchived: isArchivedQuery };
 
@@ -276,7 +284,7 @@ export class InventoryService {
   }
 
   // 5. جلب بالتفاصيل
-  async findById(id: string): Promise<Inventory> {
+  async findById(id: string): Promise<InventoryDocument> {
     const item = await this.inventoryModel
       .findOne({ _id: id, isArchived: false })
       .populate('category', 'name')

@@ -23,6 +23,8 @@ import { IncomeModule } from './modules/income/income.module';
 import { SafeModule } from './modules/safe/safe.module';
 import { BullionInventoryModule } from './modules/bullion-inventory/bullion-inventory.module';
 import { BullionSalesModule } from './modules/bullion-sales/bullion-sales.module';
+import { BarcodeSalesModule } from './modules/barcode-sales/barcode-sales.module';
+import { BarcodeInventoryModule } from './modules/barcode-inventory/barcode-inventory.module';
 
 @Module({
   imports: [
@@ -73,7 +75,9 @@ import { BullionSalesModule } from './modules/bullion-sales/bullion-sales.module
     IncomeModule,
     SafeModule,
     BullionInventoryModule,
-    BullionSalesModule, // 👈 تم إضافته هنا لتسجيل موديول مبيعات السبايك
+    BullionSalesModule,
+    BarcodeInventoryModule,
+    BarcodeSalesModule,
   ],
   controllers: [AppController],
 })
