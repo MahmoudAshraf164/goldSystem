@@ -108,22 +108,30 @@ export class BarcodeSalesService {
   }
 
   // 1. إتمام عملية البيع بالباركود وخصم البضاعة والتيكيت من المخزون العام
+  // 1. إتمام عملية البيع بالباركود وخصم البضاعة والتيكيت من المخزون العام
   async createInvoice(
     dto: CreateBarcodeInvoiceDto,
     userId: string,
   ): Promise<BarcodeInvoice> {
-    if (dto.customerId) {
-      try {
-        await this.customersService.findById(dto.customerId);
-      } catch (error) {
-        throw new NotFoundException('العميل المحدد غير موجود بالنظام');
-      }
-    }
-
     const session = await this.connection.startSession();
     session.startTransaction();
 
     try {
+      let finalCustomerId: Types.ObjectId | undefined = undefined;
+
+      // 🟢 أ) معالجة العميل: إما بـ ID موجود أو بإنشاء/ربط تلقائي بالاسم
+      if (dto.customerId) {
+        const customer = await this.customersService.findById(dto.customerId);
+        finalCustomerId = customer._id as Types.ObjectId;
+      } else if (dto.customerName && dto.customerName.trim() !== '') {
+        const autoCustomer = await this.customersService.findOrCreateCustomer(
+          dto.customerName,
+          dto.phoneNumber,
+          session,
+        );
+        finalCustomerId = autoCustomer._id as Types.ObjectId;
+      }
+
       const processedItems: Array<{
         item: Types.ObjectId;
         barcode: string;
@@ -192,11 +200,11 @@ export class BarcodeSalesService {
           (grandTotalAmount + finalPrice).toFixed(2),
         );
 
-        // 🟢 أ) تغيير حالة قطعة الباركود إلى مباعة SOLD
+        // تغيير حالة قطعة الباركود إلى مباعة SOLD
         item.status = 'SOLD';
         await item.save({ session });
 
-        // 🟢 ب) الخصم الفوري للقطعة والتيكيت من المخزون العام الأصلي المربوط بها
+        // الخصم الفوري للقطعة والتيكيت من المخزون العام الأصلي
         if (item.inventoryRef) {
           const tagWeight =
             (item as any).tagWeight ?? item.grossWeight - item.netWeight;
@@ -210,7 +218,7 @@ export class BarcodeSalesService {
           );
         }
 
-        // 🟢 جـ) تسجيل حركة الخروج في السجل
+        // تسجيل حركة الخروج
         await this.movementsService.logMovement({
           inventoryItem: (item.inventoryRef || item._id).toString(),
           type: 'SALE_OUT',
@@ -229,9 +237,7 @@ export class BarcodeSalesService {
         items: processedItems,
         totalNetWeight: grandTotalNetWeight,
         finalPaidAmount: grandTotalAmount,
-        customer: dto.customerId
-          ? new Types.ObjectId(dto.customerId)
-          : undefined,
+        customer: finalCustomerId, // 👈 تم ربط الـ ID النهائي سواء قديم أو تم إنشاؤه للتو
         createdBy: new Types.ObjectId(userId),
       });
 

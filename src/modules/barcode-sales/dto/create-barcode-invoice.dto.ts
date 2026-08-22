@@ -56,4 +56,21 @@ export class CreateBarcodeInvoiceDto {
   @IsOptional()
   @IsString()
   customerId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'اسم العميل المباشر للإنشاء التلقائي (اختياري في حال عدم تحديد customerId)',
+    example: 'أحمد محمود',
+  })
+  @IsOptional()
+  @IsString()
+  customerName?: string;
+
+  @ApiPropertyOptional({
+    description: 'رقم هاتف العميل المباشر (اختياري)',
+    example: '01012345678',
+  })
+  @IsOptional()
+  @IsString()
+  phoneNumber?: string;
 }

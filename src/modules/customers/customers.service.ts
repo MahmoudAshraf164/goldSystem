@@ -47,6 +47,38 @@ export class CustomersService {
     return newCustomer.save();
   }
 
+  // أضف هذه الدالة داخل CustomersService في ملف customers.service.ts
+
+  async findOrCreateCustomer(
+    fullName: string,
+    phoneNumber?: string,
+    session?: any,
+  ): Promise<Customer> {
+    const trimmedName = fullName.trim();
+    const trimmedPhone = phoneNumber?.trim();
+
+    // 1. البحث أولاً برقم الهاتف إن وجد
+    if (trimmedPhone) {
+      const existingByPhone = await this.customerModel
+        .findOne({ phoneNumber: trimmedPhone, status: 'ACTIVE' })
+        .session(session);
+      if (existingByPhone) return existingByPhone;
+    }
+
+    // 2. البحث بالاسم فقط
+    const existingByName = await this.customerModel
+      .findOne({ fullName: trimmedName, status: 'ACTIVE' })
+      .session(session);
+    if (existingByName) return existingByName;
+
+    // 3. إنشاء عميل جديد إن لم يوجد
+    const newCustomer = new this.customerModel({
+      fullName: trimmedName,
+      phoneNumber: trimmedPhone || undefined,
+    });
+
+    return newCustomer.save({ session });
+  }
   // 2. جلب العملاء مع البحث والفلترة
   async findAll(
     status: string = 'ACTIVE',
