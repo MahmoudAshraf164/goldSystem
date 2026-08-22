@@ -28,12 +28,16 @@ export class BarcodeInventoryService {
     private readonly inventoryModel: Model<InventoryDocument>,
     private readonly movementsService: StockMovementsService,
   ) {}
-
   private async generateUniqueBarcode(karat: number): Promise<string> {
-    const prefix = `JWL-${karat}`;
+    // جلب السنة الحالية بالأرقام (مثلاً 2026)
+    const currentYear = new Date().getFullYear().toString();
+
+    // حساب عدد القطع لعمل رقم تسلسلي
     const count = await this.barcodeInventoryModel.countDocuments().exec();
     const nextSequence = (count + 1).toString().padStart(5, '0');
-    return `${prefix}-${nextSequence}`;
+
+    // التنسيق النهائي: أرقام فقط (العيار + السنة + التسلسل)
+    return `${karat}${currentYear}${nextSequence}`;
   }
 
   // دالة مساعدة لدمج وتحديث تفاصيل التيكت في المخزون العام

@@ -11,8 +11,8 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class CreateBarcodeItemDto {
   @ApiPropertyOptional({
     description:
-      'رمز الباركود الفريد للقطعة، وفي حال عدم إرساله يقوم النظام بتوليده تلقائياً',
-    example: '20261001001',
+      'رمز الباركود (أرقام فقط)، وفي حال عدم إرساله يقوم النظام بتوليده تلقائياً بناءً على العيار والسنة',
+    example: '21202600001',
   })
   @IsOptional()
   @IsString()
@@ -46,7 +46,7 @@ export class CreateBarcodeItemDto {
   @ApiPropertyOptional({
     description: 'وزن التاج المخصوم بالجرام',
     example: 0.12,
-    default: 0,
+    default: 0.06,
   })
   @IsOptional()
   @IsNumber()
