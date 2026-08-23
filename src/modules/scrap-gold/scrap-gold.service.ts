@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { ScrapGold } from './schemas/scrap-gold.schema';
@@ -13,13 +13,14 @@ export class ScrapGoldService {
     private readonly movementsService: StockMovementsService,
   ) {}
 
-  // 1. جلب رصيد أوزان الكسر لكل عيار (18 و 21)
+  // 1. جلب رصيد أوزان الكسر
   async getInventory(): Promise<ScrapGold[]> {
     const counts = await this.scrapModel.countDocuments();
     if (counts === 0) {
       await this.scrapModel.insertMany([
         { karat: 18, totalWeight: 0 },
         { karat: 21, totalWeight: 0 },
+        { karat: 24, totalWeight: 0 },
       ]);
     }
     return this.scrapModel.find().exec();
@@ -38,10 +39,9 @@ export class ScrapGoldService {
       )
       .exec();
 
-    // تسجيل حركة مخزنية
     await this.movementsService.logMovement({
       inventoryItem: updated._id.toString(),
-      type: 'INVENTORY_IN',
+      type: 'INVENTORY_IN' as any, // 👈 التوافق مع نوع حركة المخزون
       countChange: 0,
       grossWeightChange: weight,
       netWeightChange: weight,
@@ -52,7 +52,51 @@ export class ScrapGoldService {
     return updated;
   }
 
-  // 3. 🛠️ تعديل رصيد كسر المخزن مباشرة (تسوية جرد عيار 18 أو 21)
+  // 3. 🛠️ خصم وزن كسر للمخزن (تُستخدم عند التسييح)
+  async deductScrap(
+    karat: number,
+    weight: number,
+    userId: string,
+    reason?: string,
+  ): Promise<ScrapGold> {
+    const roundedWeight = Number(weight.toFixed(3));
+
+    const currentDoc = await this.scrapModel.findOne({ karat }).exec();
+    if (!currentDoc || currentDoc.totalWeight < roundedWeight) {
+      throw new BadRequestException(
+        `رصيد الكسر المتاح لعيار ${karat} غير كافي. المتاح: ${
+          currentDoc ? currentDoc.totalWeight : 0
+        } جرام`,
+      );
+    }
+
+    const updated = await this.scrapModel
+      .findOneAndUpdate(
+        { karat },
+        { $inc: { totalWeight: -roundedWeight } },
+        { new: true },
+      )
+      .exec();
+
+    // 👈 معالجة خطأ 'updated is possibly null'
+    if (!updated) {
+      throw new BadRequestException(`فشلت عملية تحديث السجل لعيار ${karat}`);
+    }
+
+    await this.movementsService.logMovement({
+      inventoryItem: updated._id.toString(),
+      type: 'INVENTORY_OUT' as any, // 👈 تجنب تعارض الأنواع
+      countChange: 0,
+      grossWeightChange: -roundedWeight,
+      netWeightChange: -roundedWeight,
+      actionBy: userId,
+      reason: reason || `خصم ذهب كسر عيار ${karat} بوزن ${roundedWeight} جرام`,
+    });
+
+    return updated;
+  }
+
+  // 4. تعديل رصيد كسر المخزن مباشرة (تسوية جرد)
   async updateScrapBalance(
     updateScrapDto: UpdateScrapDto,
     userId: string,
@@ -72,10 +116,9 @@ export class ScrapGoldService {
       )
       .exec();
 
-    // تسجيل حركة تسوية بالفرق الناتج عن التعديل
     await this.movementsService.logMovement({
       inventoryItem: updated._id.toString(),
-      type: 'INVENTORY_IN',
+      type: 'INVENTORY_IN' as any,
       countChange: 0,
       grossWeightChange: difference,
       netWeightChange: difference,

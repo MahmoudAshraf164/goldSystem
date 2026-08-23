@@ -7,6 +7,7 @@ import { Income } from '../income/schemas/income.schema';
 import { Expense } from '../expenses/schemas/expense.schema';
 import { BullionSale } from '../bullion-sales/schemas/bullion-sale.schema';
 import { BarcodeInvoice } from '../barcode-sales/schemas/barcode-invoice.schema';
+import { ScrapPurchase } from '../scrap-purchases/schemas/scrap-purchases.schema'; // 👈 استيراد الموديل
 
 @Injectable()
 export class DailyLedgerService {
@@ -20,6 +21,8 @@ export class DailyLedgerService {
     private readonly bullionSaleModel: Model<BullionSale>,
     @InjectModel(BarcodeInvoice.name)
     private readonly barcodeInvoiceModel: Model<BarcodeInvoice>,
+    @InjectModel(ScrapPurchase.name)
+    private readonly scrapPurchaseModel: Model<ScrapPurchase>, // 👈 حقن موديل مشتريات الكسر
   ) {}
 
   async getLedgerReport() {
@@ -46,14 +49,14 @@ export class DailyLedgerService {
   }
 
   private async getDataForRange(start: Date, end: Date) {
-    // 1. حساب الكاش من جميع المصادر
+    // 1. حساب الكاش الوارد من جميع المصادر
     const newGoldCash = await this.getCash(
       this.newInvoiceModel,
       start,
       end,
       'COMPLETED',
     );
-    const barcodeGoldCash = await this.getBarcodeCash(start, end); // 👈 تم تخصيص دالة محددة بحقول الباركود Corrected
+    const barcodeGoldCash = await this.getBarcodeCash(start, end);
     const bullionGoldCash = await this.getCash(
       this.bullionSaleModel,
       start,
@@ -66,9 +69,20 @@ export class DailyLedgerService {
       end,
     );
     const extraIncomes = await this.getCash(this.incomeModel, start, end);
-    const expenses = await this.getCash(this.expenseModel, start, end);
 
-    // إجمالي الكاش الوارد
+    // 2. حساب المصروفات والسيولة الخارجة (شراء الكسر + المصاريف العامة)
+    const generalExpenses = await this.getCash(this.expenseModel, start, end);
+    const scrapPurchaseCash = await this.getCash(
+      this.scrapPurchaseModel,
+      start,
+      end,
+    ); // 👈 كاش مشتريات الكسر الخارجه
+
+    const totalExpensesOutflow = parseFloat(
+      (generalExpenses + scrapPurchaseCash).toFixed(2),
+    );
+
+    // إجمالي الكاش الوارد والـ Net
     const totalInflow = parseFloat(
       (
         newGoldCash +
@@ -78,9 +92,11 @@ export class DailyLedgerService {
         extraIncomes
       ).toFixed(2),
     );
-    const netCashflow = parseFloat((totalInflow - expenses).toFixed(2));
+    const netCashflow = parseFloat(
+      (totalInflow - totalExpensesOutflow).toFixed(2),
+    );
 
-    // 2. حساب أوزان جرامات المشغولات والباركود والسبايك
+    // 3. حساب أوزان جرامات المشغولات والباركود والسبايك ومشتريات الكسر
     const weights = await this.getWeights(start, end);
 
     return {
@@ -91,7 +107,8 @@ export class DailyLedgerService {
         bullionGoldSalesCash: bullionGoldCash,
         scrapGoldSalesCash: scrapGoldCash,
         extraIncomesCash: extraIncomes,
-        expensesOutflow: expenses,
+        expensesOutflow: totalExpensesOutflow, // 👈 أصبح يشمل المصاريف + مشتريات الكسر
+        scrapPurchasesOutflow: scrapPurchaseCash, // 👈 بند مستقل للوضوح
         totalInflow: totalInflow,
         netCashflow: netCashflow,
       },
@@ -99,19 +116,18 @@ export class DailyLedgerService {
     };
   }
 
-  // دالة مخصصة لاحتساب كاش فواتير الباركود بناء على finalPaidAmount و isCancelled
   private async getBarcodeCash(start: Date, end: Date): Promise<number> {
     const result = await this.barcodeInvoiceModel.aggregate([
       {
         $match: {
           createdAt: { $gte: start, $lte: end },
-          isCancelled: { $ne: true }, // استبعاد الفواتير الملغاة
+          isCancelled: { $ne: true },
         },
       },
       {
         $group: {
           _id: null,
-          total: { $sum: '$finalPaidAmount' }, // 👈 استخدام finalPaidAmount الصحيح
+          total: { $sum: '$finalPaidAmount' },
         },
       },
     ]);
@@ -178,19 +194,19 @@ export class DailyLedgerService {
       },
     ]);
 
-    // 2. تقرير مبيعات قطع الباركود التجزئة (تحديث التصفية والحقول)
+    // 2. تقرير مبيعات قطع الباركود
     const barcodeGoldReport = await this.barcodeInvoiceModel.aggregate([
       {
         $match: {
           createdAt: { $gte: start, $lte: end },
-          isCancelled: { $ne: true }, // 👈 استبدال status بـ isCancelled
+          isCancelled: { $ne: true },
         },
       },
       { $unwind: '$items' },
       {
         $group: {
           _id: '$items.karat',
-          totalWeight: { $sum: '$items.netWeight' }, // 👈 استخدام netWeight بدلاً من weight
+          totalWeight: { $sum: '$items.netWeight' },
         },
       },
     ]);
@@ -211,19 +227,19 @@ export class DailyLedgerService {
       },
     ]);
 
-    // 4. تقرير الذهب الكسر
-    const scrapGoldReport = await this.scrapInvoiceModel.aggregate([
+    // 4. تقرير مشتريات الذهب الكسر المباشرة (من ScrapPurchase)
+    const scrapPurchaseReport = await this.scrapPurchaseModel.aggregate([
       {
         $match: {
           createdAt: { $gte: start, $lte: end },
-          $or: [
-            { status: 'COMPLETED' },
-            { status: { $exists: false } },
-            { status: 'completed' },
-          ],
         },
       },
-      { $group: { _id: '$karat', totalWeight: { $sum: '$weight' } } },
+      {
+        $group: {
+          _id: '$karat',
+          totalWeight: { $sum: '$weight' },
+        },
+      },
     ]);
 
     const getWeightByKarat = (report: any[], karat: number) =>
@@ -253,9 +269,15 @@ export class DailyLedgerService {
         ),
       },
       scrapGoldPurchasesGrams: {
-        karat24: parseFloat(getWeightByKarat(scrapGoldReport, 24).toFixed(3)),
-        karat21: parseFloat(getWeightByKarat(scrapGoldReport, 21).toFixed(3)),
-        karat18: parseFloat(getWeightByKarat(scrapGoldReport, 18).toFixed(3)),
+        karat24: parseFloat(
+          getWeightByKarat(scrapPurchaseReport, 24).toFixed(3),
+        ),
+        karat21: parseFloat(
+          getWeightByKarat(scrapPurchaseReport, 21).toFixed(3),
+        ),
+        karat18: parseFloat(
+          getWeightByKarat(scrapPurchaseReport, 18).toFixed(3),
+        ),
       },
     };
   }

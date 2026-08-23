@@ -6,14 +6,14 @@ export class ScrapGold extends Document {
   @Prop({
     type: Number,
     required: true,
-    enum: [18, 21],
+    enum: [18, 21, 24], // 👈 إضافة عيار 24 لدعم الذهب المسبوك النقي
     unique: true,
     index: true,
   })
-  karat: number; // العيار (18 أو 21)
+  karat: number;
 
   @Prop({ type: Number, required: true, default: 0, min: 0 })
-  totalWeight: number; // 👈 الوزن الإجمالي التراكمي لذهب الكسر بهذا العيار بالجرام
+  totalWeight: number;
 }
 
 export const ScrapGoldSchema = SchemaFactory.createForClass(ScrapGold);

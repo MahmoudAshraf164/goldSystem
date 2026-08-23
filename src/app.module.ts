@@ -25,6 +25,8 @@ import { BullionInventoryModule } from './modules/bullion-inventory/bullion-inve
 import { BullionSalesModule } from './modules/bullion-sales/bullion-sales.module';
 import { BarcodeSalesModule } from './modules/barcode-sales/barcode-sales.module';
 import { BarcodeInventoryModule } from './modules/barcode-inventory/barcode-inventory.module';
+import { MeltingModule } from './modules/melting/melting.module';
+import { ScrapPurchasesModule } from './modules/scrap-purchases/scrap-purchases.module';
 
 @Module({
   imports: [
@@ -78,6 +80,8 @@ import { BarcodeInventoryModule } from './modules/barcode-inventory/barcode-inve
     BullionSalesModule,
     BarcodeInventoryModule,
     BarcodeSalesModule,
+    ScrapPurchasesModule,
+    MeltingModule,
   ],
   controllers: [AppController],
 })

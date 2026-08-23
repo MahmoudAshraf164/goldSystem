@@ -2,19 +2,22 @@ import { Injectable } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Expense } from '../expenses/schemas/expense.schema';
+import { ScrapPurchase } from '../scrap-purchases/schemas/scrap-purchases.schema'; // 👈 استيراد الموديل
 import { PurchasesQueryDto } from './dto/purchases-query.dto';
 
 @Injectable()
 export class PurchasesLedgerService {
   constructor(
     @InjectModel(Expense.name) private readonly expenseModel: Model<Expense>,
+    @InjectModel(ScrapPurchase.name)
+    private readonly scrapPurchaseModel: Model<ScrapPurchase>, // 👈 حقن موديل مشتريات الكسر
   ) {}
 
   async getOutflowsReport(query: PurchasesQueryDto) {
     const { start, end } = this.calculateDateRange(query);
 
-    // تجميع الخوارج كلها من الدفتر
-    const allOutflows = await this.expenseModel.aggregate([
+    // 1. تجميع الخوارج من جدول المصاريف (مصاريف المحل، الرواتب، إلخ)
+    const allExpenses = await this.expenseModel.aggregate([
       { $match: { createdAt: { $gte: start, $lte: end } } },
       {
         $group: {
@@ -24,29 +27,63 @@ export class PurchasesLedgerService {
       },
     ]);
 
-    // تفنيط المخرجات ببساطة
+    // تفنيط المصاريف العادية
     const shopExpenses =
-      allOutflows.find((r) => r._id === 'SHOP_EXPENSES')?.totalCash || 0; // تكاليف المحل (المقشة)
-    const goldPurchases =
-      allOutflows.find((r) => r._id === 'GOLD_PURCHASE')?.totalCash || 0; // شراء الذهب (زبون أو جملة)
+      allExpenses.find((r) => r._id === 'SHOP_EXPENSES')?.totalCash || 0; // تكاليف المحل
+    const goldPurchasesExpense =
+      allExpenses.find((r) => r._id === 'GOLD_PURCHASE')?.totalCash || 0; // شراء ذهب مسجل بالمصاريف (إن وجد)
     const salaries =
-      allOutflows.find((r) => r._id === 'SALARIES')?.totalCash || 0;
-    const others = allOutflows.find((r) => r._id === 'OTHERS')?.totalCash || 0;
+      allExpenses.find((r) => r._id === 'SALARIES')?.totalCash || 0;
+    const others = allExpenses.find((r) => r._id === 'OTHERS')?.totalCash || 0;
 
-    // مجموع الفلوس اللي خرجت من السيستم بالكامل
+    // 2. تجميع مشتريات الذهب الكسر الفعلية المباشرة من ScrapPurchase (كاش + أوزان)
+    const scrapPurchasesData = await this.scrapPurchaseModel.aggregate([
+      { $match: { createdAt: { $gte: start, $lte: end } } },
+      {
+        $group: {
+          _id: '$karat',
+          totalCash: { $sum: '$totalPrice' },
+          totalWeight: { $sum: '$weight' },
+        },
+      },
+    ]);
+
+    // إجمالي كاش مشتريات الذهب الكسر
+    const scrapGoldPurchasesCash = scrapPurchasesData.reduce(
+      (sum, item) => sum + item.totalCash,
+      0,
+    );
+
+    // تفصيل أوزان الذهب الكسر المشتراة حسب العيار
+    const scrapPurchasedGrams = {
+      karat21:
+        scrapPurchasesData.find((item) => item._id === 21)?.totalWeight || 0,
+      karat18:
+        scrapPurchasesData.find((item) => item._id === 18)?.totalWeight || 0,
+      karat24:
+        scrapPurchasesData.find((item) => item._id === 24)?.totalWeight || 0,
+    };
+
+    // إجمالي مشتريات الذهب النقدي (شراء الكسر المباشر + أي شراء مسجل بالمصاريف)
+    const totalGoldPurchasesCash =
+      goldPurchasesExpense + scrapGoldPurchasesCash;
+
+    // مجموع الفلوس الخارجة من السيستم بالكامل
     const totalOutflowsPrice = parseFloat(
-      (shopExpenses + goldPurchases + salaries + others).toFixed(2),
+      (shopExpenses + totalGoldPurchasesCash + salaries + others).toFixed(2),
     );
 
     return {
       reportPeriod: { startDate: start, endDate: end },
       outflowsBreakdown: {
-        pettyExpensesCash: shopExpenses, // تكاليف المحل العادية
-        goldPurchasesCash: goldPurchases, // مشتريات الذهب
-        salariesCash: salaries,
-        othersCash: others,
+        pettyExpensesCash: shopExpenses, // تكاليف المحل التشغيلية
+        goldPurchasesCash: totalGoldPurchasesCash, // إجمالي مشتريات الذهب النقدي
+        scrapGoldPurchasesCash: scrapGoldPurchasesCash, // 👈 بند خاص ومستقل لمشتريات الكسر
+        salariesCash: salaries, // المرتبات
+        othersCash: others, // نثريات أخرى
       },
-      totalOutflowsPrice, // إجمالي الخارج المالي الفعلي
+      scrapPurchasedGrams, // 👈 أوزان جرامات الكسر المشتراه بالتفصيل
+      totalOutflowsPrice, // إجمالي السيولة النقدية الخارجة
     };
   }
 
@@ -118,21 +155,20 @@ export class PurchasesLedgerService {
         );
       }
     } else {
-      // 3. التعامل مع الفلاتر الصافية والمحددة فقط بناءً على طلبك
+      // 3. التعامل مع الفلاتر الصافية والمحددة
       switch (query.preset) {
-        case 'YESTERDAY': // فلتر أمس: من بداية أمس لنهايته تماماً
+        case 'YESTERDAY':
           localStart.setDate(localStart.getDate() - 1);
           localEnd.setDate(localEnd.getDate() - 1);
           break;
-        case 'WEEKLY': // فلتر أسبوع فات: من 7 أيام مضت حتى نهاية اليوم الحالي
+        case 'WEEKLY':
           localStart.setDate(localStart.getDate() - 7);
           break;
-        case 'MONTHLY': // فلتر شهر فات: من شهر مضى حتى نهاية اليوم الحالي
+        case 'MONTHLY':
           localStart.setMonth(localStart.getMonth() - 1);
           break;
         case 'TODAY':
         default:
-          // يظل على قيم اليوم الافتراضية
           break;
       }
     }
