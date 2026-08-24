@@ -107,8 +107,7 @@ export class BarcodeSalesService {
     await parentInventory.save({ session });
   }
 
-  // 1. إتمام عملية البيع بالباركود وخصم البضاعة والتيكيت من المخزون العام
-  // 1. إتمام عملية البيع بالباركود وخصم البضاعة والتيكيت من المخزون العام
+  // 1. إتمام عملية البيع بالباركود وإصدار الفاتورة
   async createInvoice(
     dto: CreateBarcodeInvoiceDto,
     userId: string,
@@ -119,7 +118,6 @@ export class BarcodeSalesService {
     try {
       let finalCustomerId: Types.ObjectId | undefined = undefined;
 
-      // 🟢 أ) معالجة العميل: إما بـ ID موجود أو بإنشاء/ربط تلقائي بالاسم
       if (dto.customerId) {
         const customer = await this.customersService.findById(dto.customerId);
         finalCustomerId = customer._id as Types.ObjectId;
@@ -138,11 +136,13 @@ export class BarcodeSalesService {
         title: string;
         karat: number;
         netWeight: number;
+        weight: number;
         goldPricePerGram: number;
         goldTotalPrice: number;
         makingChargePerGram: number;
         totalMakingCharge: number;
         finalPrice: number;
+        itemTotal: number;
       }> = [];
 
       let grandTotalNetWeight = 0;
@@ -186,11 +186,13 @@ export class BarcodeSalesService {
           title: item.title,
           karat: item.karat,
           netWeight: item.netWeight,
+          weight: item.netWeight, // 🟢 إضافة weight صراحة
           goldPricePerGram: goldPrice,
           goldTotalPrice,
           makingChargePerGram: makingCharge,
           totalMakingCharge,
           finalPrice,
+          itemTotal: finalPrice, // 🟢 إضافة itemTotal صراحة
         });
 
         grandTotalNetWeight = parseFloat(
@@ -200,11 +202,9 @@ export class BarcodeSalesService {
           (grandTotalAmount + finalPrice).toFixed(2),
         );
 
-        // تغيير حالة قطعة الباركود إلى مباعة SOLD
         item.status = 'SOLD';
         await item.save({ session });
 
-        // الخصم الفوري للقطعة والتيكيت من المخزون العام الأصلي
         if (item.inventoryRef) {
           const tagWeight =
             (item as any).tagWeight ?? item.grossWeight - item.netWeight;
@@ -218,7 +218,6 @@ export class BarcodeSalesService {
           );
         }
 
-        // تسجيل حركة الخروج
         await this.movementsService.logMovement({
           inventoryItem: (item.inventoryRef || item._id).toString(),
           type: 'SALE_OUT',
@@ -237,13 +236,15 @@ export class BarcodeSalesService {
         items: processedItems,
         totalNetWeight: grandTotalNetWeight,
         finalPaidAmount: grandTotalAmount,
-        customer: finalCustomerId, // 👈 تم ربط الـ ID النهائي سواء قديم أو تم إنشاؤه للتو
+        totalAmount: grandTotalAmount, // 🟢 حفظ الإجمالي صراحة
+        customer: finalCustomerId,
         createdBy: new Types.ObjectId(userId),
+        status: 'ACTIVE',
+        isCancelled: false,
       });
 
       const savedInvoice = await newInvoice.save({ session });
 
-      // تحصيل المبلغ للخزنة
       await this.safeService.triggerTransaction(
         savedInvoice.finalPaidAmount,
         'INFLOW',
@@ -254,7 +255,8 @@ export class BarcodeSalesService {
       await session.commitTransaction();
       session.endSession();
 
-      return savedInvoice;
+      // 🟢 إرجاع الفاتورة مع عمل populate للكاشير والعميل
+      return this.findInvoiceById(savedInvoice._id.toString());
     } catch (error) {
       await session.abortTransaction();
       session.endSession();
@@ -262,14 +264,16 @@ export class BarcodeSalesService {
     }
   }
 
-  // 2. جلب جميع الفواتير
+  // 2. جلب جميع الفواتير (إرجاع مصفوفة مباشرة [])
   async findAllInvoices(): Promise<BarcodeInvoice[]> {
-    return this.invoiceModel
+    const invoices = await this.invoiceModel
       .find({ isCancelled: false })
-      .populate('createdBy', 'name')
+      .populate('createdBy', 'fullName name email')
       .populate('customer', 'fullName phoneNumber')
       .sort({ createdAt: -1 })
       .exec();
+
+    return Array.isArray(invoices) ? invoices : [];
   }
 
   // 3. جلب تفاصيل فاتورة بالـ ID
@@ -280,7 +284,7 @@ export class BarcodeSalesService {
 
     const invoice = await this.invoiceModel
       .findById(id)
-      .populate('createdBy', 'name')
+      .populate('createdBy', 'fullName name email')
       .populate('customer', 'fullName phoneNumber')
       .exec();
 
@@ -291,7 +295,7 @@ export class BarcodeSalesService {
     return invoice;
   }
 
-  // 4. تعديل الفاتورة وتعديل التزامن والتيكيتات مع المخزون العام
+  // 4. تعديل الفاتورة
   async updateInvoice(
     id: string,
     dto: CreateBarcodeInvoiceDto,
@@ -327,7 +331,6 @@ export class BarcodeSalesService {
       );
       const newBarcodes = new Set(dto.items.map((i) => i.barcode.trim()));
 
-      // 🟢 إعادة القطع والمأخوذات المحذوفة للتعديل للمخزون العام والتيكيتات
       for (const [barcode, oldItem] of oldItemsMap.entries()) {
         if (!newBarcodes.has(barcode)) {
           const barcodeItem = await this.barcodeInventoryModel
@@ -367,18 +370,19 @@ export class BarcodeSalesService {
         }
       }
 
-      // 🟢 معالجة القطع المضافة حديثاً للتعديل
       const processedItems: Array<{
         item: Types.ObjectId;
         barcode: string;
         title: string;
         karat: number;
         netWeight: number;
+        weight: number;
         goldPricePerGram: number;
         goldTotalPrice: number;
         makingChargePerGram: number;
         totalMakingCharge: number;
         finalPrice: number;
+        itemTotal: number;
       }> = [];
 
       let grandTotalNetWeight = 0;
@@ -452,11 +456,13 @@ export class BarcodeSalesService {
           title: item.title,
           karat: item.karat,
           netWeight: item.netWeight,
+          weight: item.netWeight, // 🟢 إضافة weight
           goldPricePerGram: goldPrice,
           goldTotalPrice,
           makingChargePerGram: makingCharge,
           totalMakingCharge,
           finalPrice,
+          itemTotal: finalPrice, // 🟢 إضافة itemTotal
         });
 
         grandTotalNetWeight = parseFloat(
@@ -467,7 +473,6 @@ export class BarcodeSalesService {
         );
       }
 
-      // التسوية المالية للخزنة
       const oldAmount = existingInvoice.finalPaidAmount;
       const amountDifference = grandTotalAmount - oldAmount;
 
@@ -490,16 +495,17 @@ export class BarcodeSalesService {
       existingInvoice.items = processedItems;
       existingInvoice.totalNetWeight = grandTotalNetWeight;
       existingInvoice.finalPaidAmount = grandTotalAmount;
+      existingInvoice.totalAmount = grandTotalAmount; // 🟢 تحديث الإجمالي
       existingInvoice.customer = dto.customerId
         ? new Types.ObjectId(dto.customerId)
         : undefined;
 
-      const updatedInvoice = await existingInvoice.save({ session });
+      await existingInvoice.save({ session });
 
       await session.commitTransaction();
       session.endSession();
 
-      return updatedInvoice;
+      return this.findInvoiceById(id);
     } catch (error) {
       await session.abortTransaction();
       session.endSession();
@@ -507,7 +513,7 @@ export class BarcodeSalesService {
     }
   }
 
-  // 5. إلغاء فاتورة وإرجاع البضاعة والتيكيتات كاملة للمخزون العام
+  // 5. إلغاء الفاتورة
   async cancelInvoice(id: string, userId: string): Promise<BarcodeInvoice> {
     const invoice = await this.invoiceModel.findById(id);
     if (!invoice) {
@@ -531,7 +537,6 @@ export class BarcodeSalesService {
           barcodeItem.status = 'AVAILABLE';
           await barcodeItem.save({ session });
 
-          // 🟢 إرجاع القطعة والتيكيت للمخزون العام
           if (barcodeItem.inventoryRef) {
             const tagWeight =
               (barcodeItem as any).tagWeight ??
@@ -560,7 +565,6 @@ export class BarcodeSalesService {
         }
       }
 
-      // خصم المبلغ المرتجع من الخزنة
       await this.safeService.triggerTransaction(
         invoice.finalPaidAmount,
         'OUTFLOW',
@@ -569,12 +573,13 @@ export class BarcodeSalesService {
       );
 
       invoice.isCancelled = true;
-      const updatedInvoice = await invoice.save({ session });
+      invoice.status = 'CANCELLED'; // 🟢 تعيين الحالة إلى CANCELLED
+      await invoice.save({ session });
 
       await session.commitTransaction();
       session.endSession();
 
-      return updatedInvoice;
+      return this.findInvoiceById(id);
     } catch (error) {
       await session.abortTransaction();
       session.endSession();

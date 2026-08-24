@@ -49,7 +49,8 @@ export class BarcodeSalesController {
     description: 'القطعة غير موجودة بالمخزن أو العميل غير موجود',
   })
   async checkout(@Body() dto: CreateBarcodeInvoiceDto, @Request() req: any) {
-    return this.barcodeSalesService.createInvoice(dto, req.user.userId);
+    const userId = req.user?.userId || req.user?.sub;
+    return this.barcodeSalesService.createInvoice(dto, userId);
   }
 
   @Get('invoices')
@@ -57,7 +58,7 @@ export class BarcodeSalesController {
   @ApiOperation({
     summary: 'جلب جميع فواتير مبيعات الباركود',
     description:
-      'استرجاع قائمة بكافة الفواتير النشطة وغير الملغاة مرتبة من الأحدث للأقدم مع بيانات العميل والبائع.',
+      'استرجاع قائمة بكافة الفواتير النشطة وغير الملغاة مرتبة من الأحدث للأقدم مع بيانات العميل والبائع كـ Array مباشرة.',
   })
   @ApiOkResponse({ description: 'قائمة فواتير المبيعات' })
   async getInvoices() {
@@ -68,19 +69,12 @@ export class BarcodeSalesController {
   @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
     summary: 'تعديل فاتورة بيع بالباركود قائمة',
-    description:
-      'تعديل أسعار الجرام أو المصنعيات أو إضافة/حذف قطع من الفاتورة مع التسوية الآلية للمخزون والخزنة وحركات المخزن.',
   })
   @ApiParam({
     name: 'id',
     description: 'معرف الفاتورة (MongoDB ObjectId)',
-    example: '60d5ecb8b5c9c22b4c8b8888',
   })
   @ApiOkResponse({ description: 'تم تعديل الفاتورة بنجاح' })
-  @ApiBadRequestResponse({
-    description: 'البيانات غير صالحة أو الفاتورة ملغاة',
-  })
-  @ApiNotFoundResponse({ description: 'الفاتورة أو القطع غير موجودة' })
   async updateInvoice(
     @Param('id') id: string,
     @Body() dto: CreateBarcodeInvoiceDto,
@@ -94,17 +88,12 @@ export class BarcodeSalesController {
   @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
     summary: 'جلب تفاصيل فاتورة بيع بالباركود بواسطة الـ ID',
-    description:
-      'استرجاع تفاصيل فاتورة محددة مع جميع القطع الموجودة بها واسم البائع والعميل.',
   })
   @ApiParam({
     name: 'id',
     description: 'معرف الفاتورة (MongoDB ObjectId)',
-    example: '60d5ecb8b5c9c22b4c8b8888',
   })
   @ApiOkResponse({ description: 'تفاصيل الفاتورة المطلوبة' })
-  @ApiNotFoundResponse({ description: 'الفاتورة غير موجودة' })
-  @ApiBadRequestResponse({ description: 'معرف الفاتورة غير صالح' })
   async getInvoiceById(@Param('id') id: string) {
     return this.barcodeSalesService.findInvoiceById(id);
   }
@@ -113,20 +102,16 @@ export class BarcodeSalesController {
   @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
     summary: 'إلغاء فاتورة بيع واسترجاع المخزون والنقدية',
-    description:
-      'إلغاء الفاتورة، وإرجاع كافة قطاع الذهب للمخزن بحالة (IN_STOCK)، وإعادة خصم المبلغ المدفوع من الخزنة مع تسجيل الحركة المخزنية.',
   })
   @ApiParam({
     name: 'id',
     description: 'معرف الفاتورة المراد إلغاؤها',
-    example: '60d5ecb8b5c9c22b4c8b8888',
   })
   @ApiOkResponse({
     description: 'تم إلغاء الفاتورة وإرجاع المخزون والخزنة بنجاح',
   })
-  @ApiBadRequestResponse({ description: 'الفاتورة ملغاة بالفعل' })
-  @ApiNotFoundResponse({ description: 'الفاتورة غير موجودة' })
   async cancelInvoice(@Param('id') id: string, @Request() req: any) {
-    return this.barcodeSalesService.cancelInvoice(id, req.user.userId);
+    const userId = req.user?.userId || req.user?.sub;
+    return this.barcodeSalesService.cancelInvoice(id, userId);
   }
 }
