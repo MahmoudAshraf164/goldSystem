@@ -5,7 +5,10 @@ import { StockMovement } from './schemas/stock-movement.schema';
 
 export type MovementType =
   | 'INVENTORY_IN'
+  | 'INVENTORY_OUT'
   | 'SALE_OUT'
+  | 'SCRAP_IN'
+  | 'SCRAP_OUT'
   | 'INVOICE_CANCEL_RETURN'
   | 'INVOICE_UPDATE_RETURN'
   | 'INVOICE_UPDATE_OUT'
@@ -25,7 +28,7 @@ export class StockMovementsService {
   // دالة تسجيل الحركة فوراً في الداتا بيز
   async logMovement(data: {
     inventoryItem: string | Types.ObjectId;
-    type: MovementType; // 👈 استخدام الـ Union Type المحدث الذي يغطي جميع حالات الباركود والسبايك
+    type: MovementType;
     countChange: number;
     grossWeightChange: number;
     netWeightChange: number;

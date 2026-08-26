@@ -10,10 +10,13 @@ export class StockMovement extends Document {
     type: String,
     enum: [
       'INVENTORY_IN',
+      'INVENTORY_OUT', // 🟢 أُضيفت لحركات الخصم والمخزون
       'SALE_OUT',
-      'INVOICE_CANCEL_RETURN', // 👈 إضافة نوع إرجاع الباركود عند إلغاء الفاتورة
-      'INVOICE_UPDATE_RETURN', // 👈 إرجاع قطعة للمخزن عند تعديل الفاتورة
-      'INVOICE_UPDATE_OUT', // 👈 خروج قطعة جديدة عند تعديل الفاتورة
+      'SCRAP_IN', // 🟢 أُضيفت لإدخال/شراء الكسر والمسبوك
+      'SCRAP_OUT', // 🟢 أُضيفت لخصم/تسييح الكسر
+      'INVOICE_CANCEL_RETURN',
+      'INVOICE_UPDATE_RETURN',
+      'INVOICE_UPDATE_OUT',
       'BULLION_IN',
       'BULLION_SALE_OUT',
       'BULLION_UPDATE_RETURN',

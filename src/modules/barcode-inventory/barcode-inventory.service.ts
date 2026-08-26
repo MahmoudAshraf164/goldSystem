@@ -31,6 +31,9 @@ export class BarcodeInventoryService {
     private readonly movementsService: StockMovementsService,
   ) {}
 
+  /**
+   * توليد رقم باركود فريد أوتوماتيكياً (العيار + السنة + تسلسل من 5 أرقام)
+   */
   private async generateUniqueBarcode(karat: number): Promise<string> {
     const currentYear = new Date().getFullYear().toString();
     const count = await this.barcodeInventoryModel.countDocuments().exec();
@@ -259,7 +262,7 @@ export class BarcodeInventoryService {
         ? updateDto.inventoryRef.toString()
         : oldInvId;
 
-      // 🟢 1. حالة: نقل القطعة إلى مخزن رئيسي مختلف
+      // 1. حالة: نقل القطعة إلى مخزن رئيسي مختلف
       if (oldInvId && newInvId && oldInvId !== newInvId) {
         const oldInv = await this.inventoryModel
           .findById(oldInvId)
@@ -307,7 +310,7 @@ export class BarcodeInventoryService {
           await newInv.save({ session });
         }
       }
-      // 🟢 2. حالة: تعديل الأوزان والتيكت على نفس المخزون الرئيسي
+      // 2. حالة: تعديل الأوزان والتيكت على نفس المخزون الرئيسي
       else if (newInvId) {
         const invItem = await this.inventoryModel
           .findById(newInvId)
@@ -347,7 +350,7 @@ export class BarcodeInventoryService {
         }
       }
 
-      // 🟢 تحديث قطعة الباركود
+      // تحديث قطعة الباركود
       const updatedItem = await this.barcodeInventoryModel
         .findByIdAndUpdate(
           item._id,
@@ -453,7 +456,7 @@ export class BarcodeInventoryService {
 
     await this.movementsService.logMovement({
       inventoryItem: (item.inventoryRef || item._id).toString(),
-      type: 'SALE_OUT',
+      type: 'INVENTORY_OUT',
       countChange: -1,
       grossWeightChange: -item.grossWeight,
       netWeightChange: -item.netWeight,
