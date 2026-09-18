@@ -108,6 +108,7 @@ export class BarcodeSalesService {
   }
 
   // 1. إتمام عملية البيع بالباركود وإصدار الفاتورة
+  // 1. إتمام عملية البيع بالباركود وإصدار الفاتورة
   async createInvoice(
     dto: CreateBarcodeInvoiceDto,
     userId: string,
@@ -120,14 +121,27 @@ export class BarcodeSalesService {
 
       if (dto.customerId) {
         const customer = await this.customersService.findById(dto.customerId);
-        finalCustomerId = customer._id as Types.ObjectId;
+        finalCustomerId = (customer as any)?._id as Types.ObjectId;
       } else if (dto.customerName && dto.customerName.trim() !== '') {
-        const autoCustomer = await this.customersService.findOrCreateCustomer(
-          dto.customerName,
-          dto.phoneNumber,
-          session,
-        );
-        finalCustomerId = autoCustomer._id as Types.ObjectId;
+        try {
+          const newCustomer: any = await this.customersService.create({
+            fullName: dto.customerName.trim(),
+            phoneNumber: dto.phoneNumber?.trim(),
+          } as any);
+          if (newCustomer && newCustomer._id) {
+            finalCustomerId = newCustomer._id as Types.ObjectId;
+          }
+        } catch (e) {
+          // في حال كان العميل موجوداً مسبقاً برقم الهاتف
+          if (dto.phoneNumber) {
+            const existingCust: any = await this.customersService.findByPhone(
+              dto.phoneNumber.trim(),
+            );
+            if (existingCust && existingCust._id) {
+              finalCustomerId = existingCust._id as Types.ObjectId;
+            }
+          }
+        }
       }
 
       const processedItems: Array<{
@@ -143,6 +157,7 @@ export class BarcodeSalesService {
         totalMakingCharge: number;
         finalPrice: number;
         itemTotal: number;
+        images?: string[];
       }> = [];
 
       let grandTotalNetWeight = 0;
@@ -151,6 +166,7 @@ export class BarcodeSalesService {
       for (const saleItem of dto.items) {
         const item = await this.barcodeInventoryModel
           .findOne({ barcode: saleItem.barcode.trim(), isArchived: false })
+          .populate('inventoryRef')
           .session(session)
           .exec();
 
@@ -180,19 +196,28 @@ export class BarcodeSalesService {
           (goldTotalPrice + totalMakingCharge).toFixed(2),
         );
 
+        // 🖼️ جلب صور القطعة من قطعة الباركود أو من المخزون الأب إن وجدت
+        const itemImages: string[] =
+          (item as any).images && (item as any).images.length > 0
+            ? (item as any).images
+            : (item as any).image
+              ? [(item as any).image]
+              : (item.inventoryRef as any)?.images || [];
+
         processedItems.push({
           item: item._id as Types.ObjectId,
           barcode: item.barcode,
           title: item.title,
           karat: item.karat,
           netWeight: item.netWeight,
-          weight: item.netWeight, // 🟢 إضافة weight صراحة
+          weight: item.netWeight,
           goldPricePerGram: goldPrice,
           goldTotalPrice,
           makingChargePerGram: makingCharge,
           totalMakingCharge,
           finalPrice,
-          itemTotal: finalPrice, // 🟢 إضافة itemTotal صراحة
+          itemTotal: finalPrice,
+          images: itemImages, // 🟢 ربط الصور الخاصة بالقطعة المباعة
         });
 
         grandTotalNetWeight = parseFloat(
@@ -206,10 +231,14 @@ export class BarcodeSalesService {
         await item.save({ session });
 
         if (item.inventoryRef) {
+          const invRefId =
+            typeof item.inventoryRef === 'object'
+              ? item.inventoryRef._id
+              : item.inventoryRef;
           const tagWeight =
             (item as any).tagWeight ?? item.grossWeight - item.netWeight;
           await this.updateParentInventory(
-            item.inventoryRef,
+            invRefId,
             item.grossWeight,
             item.netWeight,
             tagWeight,
@@ -218,8 +247,14 @@ export class BarcodeSalesService {
           );
         }
 
+        const logRefId = item.inventoryRef
+          ? typeof item.inventoryRef === 'object'
+            ? item.inventoryRef._id
+            : item.inventoryRef
+          : item._id;
+
         await this.movementsService.logMovement({
-          inventoryItem: (item.inventoryRef || item._id).toString(),
+          inventoryItem: logRefId.toString(),
           type: 'SALE_OUT',
           countChange: -1,
           grossWeightChange: -item.grossWeight,
@@ -236,7 +271,7 @@ export class BarcodeSalesService {
         items: processedItems,
         totalNetWeight: grandTotalNetWeight,
         finalPaidAmount: grandTotalAmount,
-        totalAmount: grandTotalAmount, // 🟢 حفظ الإجمالي صراحة
+        totalAmount: grandTotalAmount,
         customer: finalCustomerId,
         createdBy: new Types.ObjectId(userId),
         status: 'ACTIVE',
@@ -255,7 +290,6 @@ export class BarcodeSalesService {
       await session.commitTransaction();
       session.endSession();
 
-      // 🟢 إرجاع الفاتورة مع عمل populate للكاشير والعميل
       return this.findInvoiceById(savedInvoice._id.toString());
     } catch (error) {
       await session.abortTransaction();
@@ -264,7 +298,7 @@ export class BarcodeSalesService {
     }
   }
 
-  // 2. جلب جميع الفواتير (إرجاع مصفوفة مباشرة [])
+  // 2. جلب جميع الفواتير
   async findAllInvoices(): Promise<BarcodeInvoice[]> {
     const invoices = await this.invoiceModel
       .find({ isCancelled: false })
@@ -383,6 +417,7 @@ export class BarcodeSalesService {
         totalMakingCharge: number;
         finalPrice: number;
         itemTotal: number;
+        images?: string[];
       }> = [];
 
       let grandTotalNetWeight = 0;
@@ -392,6 +427,7 @@ export class BarcodeSalesService {
         const trimmedBarcode = saleItem.barcode.trim();
         const item = await this.barcodeInventoryModel
           .findOne({ barcode: trimmedBarcode, isArchived: false })
+          .populate('inventoryRef')
           .session(session)
           .exec();
 
@@ -413,10 +449,14 @@ export class BarcodeSalesService {
           await item.save({ session });
 
           if (item.inventoryRef) {
+            const invRefId =
+              typeof item.inventoryRef === 'object'
+                ? item.inventoryRef._id
+                : item.inventoryRef;
             const tagWeight =
               (item as any).tagWeight ?? item.grossWeight - item.netWeight;
             await this.updateParentInventory(
-              item.inventoryRef,
+              invRefId,
               item.grossWeight,
               item.netWeight,
               tagWeight,
@@ -425,8 +465,14 @@ export class BarcodeSalesService {
             );
           }
 
+          const logRefId = item.inventoryRef
+            ? typeof item.inventoryRef === 'object'
+              ? item.inventoryRef._id
+              : item.inventoryRef
+            : item._id;
+
           await this.movementsService.logMovement({
-            inventoryItem: (item.inventoryRef || item._id).toString(),
+            inventoryItem: logRefId.toString(),
             type: 'INVOICE_UPDATE_OUT',
             countChange: -1,
             grossWeightChange: -item.grossWeight,
@@ -450,19 +496,27 @@ export class BarcodeSalesService {
           (goldTotalPrice + totalMakingCharge).toFixed(2),
         );
 
+        const itemImages: string[] =
+          (item as any).images && (item as any).images.length > 0
+            ? (item as any).images
+            : (item as any).image
+              ? [(item as any).image]
+              : (item.inventoryRef as any)?.images || [];
+
         processedItems.push({
           item: item._id as Types.ObjectId,
           barcode: item.barcode,
           title: item.title,
           karat: item.karat,
           netWeight: item.netWeight,
-          weight: item.netWeight, // 🟢 إضافة weight
+          weight: item.netWeight,
           goldPricePerGram: goldPrice,
           goldTotalPrice,
           makingChargePerGram: makingCharge,
           totalMakingCharge,
           finalPrice,
-          itemTotal: finalPrice, // 🟢 إضافة itemTotal
+          itemTotal: finalPrice,
+          images: itemImages,
         });
 
         grandTotalNetWeight = parseFloat(
@@ -492,10 +546,10 @@ export class BarcodeSalesService {
         );
       }
 
-      existingInvoice.items = processedItems;
+      existingInvoice.items = processedItems as any;
       existingInvoice.totalNetWeight = grandTotalNetWeight;
       existingInvoice.finalPaidAmount = grandTotalAmount;
-      existingInvoice.totalAmount = grandTotalAmount; // 🟢 تحديث الإجمالي
+      existingInvoice.totalAmount = grandTotalAmount;
       existingInvoice.customer = dto.customerId
         ? new Types.ObjectId(dto.customerId)
         : undefined;
@@ -573,7 +627,7 @@ export class BarcodeSalesService {
       );
 
       invoice.isCancelled = true;
-      invoice.status = 'CANCELLED'; // 🟢 تعيين الحالة إلى CANCELLED
+      invoice.status = 'CANCELLED';
       await invoice.save({ session });
 
       await session.commitTransaction();

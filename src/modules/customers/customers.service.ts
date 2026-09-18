@@ -10,6 +10,7 @@ import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { Invoice } from '../sales/schemas/invoice.schema';
 import { BullionSale } from '../bullion-sales/schemas/bullion-sale.schema';
+import { BarcodeInvoice } from '../barcode-sales/schemas/barcode-invoice.schema';
 
 @Injectable()
 export class CustomersService {
@@ -18,9 +19,19 @@ export class CustomersService {
     @InjectModel(Invoice.name) private readonly invoiceModel: Model<Invoice>,
     @InjectModel(BullionSale.name)
     private readonly bullionSaleModel: Model<BullionSale>,
+    @InjectModel(BarcodeInvoice.name)
+    private readonly barcodeInvoiceModel: Model<BarcodeInvoice>,
   ) {}
 
-  // 1. إنشاء عميل جديد
+  // 🟢 1. البحث عن عميل برقم الهاتف (مُحدثة للتوافق مع BarcodeSalesService)
+  async findByPhone(phoneNumber: string): Promise<Customer | null> {
+    if (!phoneNumber || phoneNumber.trim() === '') return null;
+    return this.customerModel
+      .findOne({ phoneNumber: phoneNumber.trim(), status: 'ACTIVE' })
+      .exec();
+  }
+
+  // 🟢 2. إنشاء عميل جديد
   async create(createCustomerDto: CreateCustomerDto): Promise<Customer> {
     const payload: any = { ...createCustomerDto };
     if (
@@ -44,7 +55,7 @@ export class CustomersService {
     return newCustomer.save();
   }
 
-  // 2. جلب العملاء مع البحث والفلترة
+  // 🟢 3. جلب العملاء مع البحث والفلترة
   async findAll(
     status: string = 'ACTIVE',
     search?: string,
@@ -63,7 +74,7 @@ export class CustomersService {
     return this.customerModel.find(filter).sort({ createdAt: -1 }).exec();
   }
 
-  // 3. جلب عميل محدد بالـ ID (تم إضافتها هنا لتفادي خطأ عدم وجودها)
+  // 🟢 4. جلب عميل محدد بالـ ID
   async findById(id: string): Promise<Customer> {
     const customer = await this.customerModel
       .findOne({ _id: id, status: 'ACTIVE' })
@@ -74,11 +85,11 @@ export class CustomersService {
     return customer;
   }
 
-  // 4. جلب سجل الفواتير والمشتريات الكامل للعميل (جديد + سبايك)
+  // 🟢 5. جلب سجل الفواتير والمشتريات الكامل للعميل (عادية + سبايك + باركود)
   async getCustomerStatement(customerId: string) {
     const customer = await this.findById(customerId);
 
-    // استخدام lean<any>() لتجاوز قيود الأنواع (TypeScript) مع حقول التواريخ
+    // جلب الفواتير العادية
     const standardInvoices = (await this.invoiceModel
       .find({ customer: customerId })
       .populate('items.inventoryItem', 'title karat')
@@ -86,9 +97,17 @@ export class CustomersService {
       .lean()
       .exec()) as any[];
 
+    // جلب فواتير السبايك
     const bullionSales = (await this.bullionSaleModel
       .find({ customer: customerId })
       .populate('seller', 'fullName role')
+      .lean()
+      .exec()) as any[];
+
+    // جلب فواتير مبيعات الباركود
+    const barcodeInvoices = (await this.barcodeInvoiceModel
+      .find({ customer: customerId })
+      .populate('createdBy', 'fullName role')
       .lean()
       .exec()) as any[];
 
@@ -110,9 +129,20 @@ export class CustomersService {
       date: sale.createdAt,
     }));
 
-    const allInvoices = [...formattedStandard, ...formattedBullion].sort(
-      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
-    );
+    const formattedBarcode = barcodeInvoices.map((bInv) => ({
+      ...bInv,
+      invoiceType: 'BARCODE',
+      displayNumber: bInv.invoiceNumber,
+      displayTotal: bInv.finalPaidAmount || bInv.totalAmount || 0,
+      displayWeight: bInv.totalNetWeight || 0,
+      date: bInv.createdAt,
+    }));
+
+    const allInvoices = [
+      ...formattedStandard,
+      ...formattedBullion,
+      ...formattedBarcode,
+    ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     const completedStandard = standardInvoices.filter(
       (inv) => inv.status !== 'CANCELLED',
@@ -120,10 +150,17 @@ export class CustomersService {
     const completedBullion = bullionSales.filter(
       (sale) => sale.status !== 'CANCELLED',
     );
+    const completedBarcode = barcodeInvoices.filter(
+      (bInv) => !bInv.isCancelled && bInv.status !== 'CANCELLED',
+    );
 
     const totalSpent =
       completedStandard.reduce((sum, inv) => sum + (inv.totalPrice || 0), 0) +
-      completedBullion.reduce((sum, sale) => sum + (sale.grandTotal || 0), 0);
+      completedBullion.reduce((sum, sale) => sum + (sale.grandTotal || 0), 0) +
+      completedBarcode.reduce(
+        (sum, bInv) => sum + (bInv.finalPaidAmount || bInv.totalAmount || 0),
+        0,
+      );
 
     const totalWeightBought =
       completedStandard.reduce(
@@ -132,6 +169,10 @@ export class CustomersService {
       ) +
       completedBullion.reduce(
         (sum, sale) => sum + (sale.totalGoldWeight || 0),
+        0,
+      ) +
+      completedBarcode.reduce(
+        (sum, bInv) => sum + (bInv.totalNetWeight || 0),
         0,
       );
 
@@ -146,7 +187,7 @@ export class CustomersService {
     };
   }
 
-  // 5. تعديل بيانات عميل
+  // 🟢 6. تعديل بيانات عميل
   async update(
     id: string,
     updateCustomerDto: UpdateCustomerDto,
@@ -192,7 +233,7 @@ export class CustomersService {
     return updatedCustomer;
   }
 
-  // 6. الحذف الناعم (الأرشفة)
+  // 🟢 7. الحذف الناعم (الأرشفة)
   async softDelete(id: string): Promise<void> {
     const result = await this.customerModel.updateOne(
       { _id: id, status: 'ACTIVE' },

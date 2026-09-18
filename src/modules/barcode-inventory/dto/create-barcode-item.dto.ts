@@ -2,10 +2,11 @@ import {
   IsString,
   IsNumber,
   IsOptional,
-  IsEnum,
   Min,
   IsNotEmpty,
+  IsIn,
 } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateBarcodeItemDto {
@@ -23,7 +24,7 @@ export class CreateBarcodeItemDto {
     example: 'خاتم سوليتير عيار 21',
   })
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'عنوان القطعة مطلوب' })
   title: string;
 
   @ApiProperty({
@@ -31,16 +32,18 @@ export class CreateBarcodeItemDto {
     enum: [18, 21, 24],
     example: 21,
   })
-  @IsNumber()
-  @IsEnum([18, 21, 24])
+  @Type(() => Number)
+  @IsNumber({}, { message: 'يجب أن يكون العيار رقماً' })
+  @IsIn([18, 21, 24], { message: 'العيار يجب أن يكون 18 أو 21 أو 24' })
   karat: number;
 
   @ApiProperty({
     description: 'الوزن القائم (الإجمالي) بالجرام شامل التاج',
     example: 5.45,
   })
-  @IsNumber()
-  @Min(0.001)
+  @Type(() => Number)
+  @IsNumber({}, { message: 'يجب أن يكون الوزن القائم رقماً' })
+  @Min(0.001, { message: 'الوزن القائم يجب أن يكون أكبر من 0' })
   grossWeight: number;
 
   @ApiPropertyOptional({
@@ -49,13 +52,15 @@ export class CreateBarcodeItemDto {
     default: 0.06,
   })
   @IsOptional()
-  @IsNumber()
-  @Min(0)
+  @Type(() => Number)
+  @IsNumber({}, { message: 'وزن التاج يجب أن يكون رقماً' })
+  @Min(0, { message: 'وزن التاج لا يمكن أن يكون بالسالب' })
   tagWeight?: number;
 
   @ApiProperty({ description: 'مصنعية الجرام الواحد للقطعة', example: 150.0 })
-  @IsNumber()
-  @Min(0)
+  @Type(() => Number)
+  @IsNumber({}, { message: 'المصنعية يجب أن تكون رقماً' })
+  @Min(0, { message: 'المصنعية لا يمكن أن تكون بالسالب' })
   makingChargePerGram: number;
 
   @ApiPropertyOptional({
@@ -79,4 +84,13 @@ export class CreateBarcodeItemDto {
   @IsOptional()
   @IsString()
   companyName?: string;
+
+  // 🟢 حقل رفع ملف الصورة فقط من الجهاز
+  @ApiPropertyOptional({
+    type: 'string',
+    format: 'binary',
+    description: 'ملف صورة القطعة من الجهاز',
+  })
+  @IsOptional()
+  file?: any;
 }

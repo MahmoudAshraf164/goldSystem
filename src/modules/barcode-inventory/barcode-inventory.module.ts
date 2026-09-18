@@ -8,6 +8,7 @@ import {
 } from './schemas/barcode-inventory.schema';
 import { StockMovementsModule } from '../stock-movements/stock-movements.module';
 import { InventoryModule } from '../inventory/inventory.module';
+import { CloudinaryService } from '../../common/cloudinary.service';
 
 @Module({
   imports: [
@@ -18,7 +19,7 @@ import { InventoryModule } from '../inventory/inventory.module';
     forwardRef(() => InventoryModule),
   ],
   controllers: [BarcodeInventoryController],
-  providers: [BarcodeInventoryService],
+  providers: [BarcodeInventoryService, CloudinaryService],
   exports: [BarcodeInventoryService, MongooseModule],
 })
 export class BarcodeInventoryModule {}

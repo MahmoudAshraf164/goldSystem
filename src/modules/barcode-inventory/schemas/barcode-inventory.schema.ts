@@ -36,7 +36,6 @@ export class BarcodeInventory {
   @Prop({ type: Types.ObjectId, ref: 'Category', required: false })
   category?: Types.ObjectId;
 
-  // 👈 ربط قطعة الباركود بالمخزون العام
   @Prop({
     type: Types.ObjectId,
     ref: 'Inventory',
@@ -47,6 +46,10 @@ export class BarcodeInventory {
 
   @Prop({ default: '-' })
   companyName: string;
+
+  // 👈 إضافة رابط الصورة الخاصة بالقطعة
+  @Prop({ default: null })
+  imageUrl?: string;
 
   @Prop({ default: false })
   isArchived: boolean;

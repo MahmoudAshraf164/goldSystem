@@ -83,8 +83,7 @@ import { SuppliersModule } from './modules/suppliers/suppliers.module';
     BarcodeSalesModule,
     ScrapPurchasesModule,
     MeltingModule,
-     SuppliersModule,
-
+    SuppliersModule,
   ],
   controllers: [AppController],
 })

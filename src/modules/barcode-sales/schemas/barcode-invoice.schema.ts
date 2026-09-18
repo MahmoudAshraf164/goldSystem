@@ -24,7 +24,7 @@ export class BarcodeInvoiceItem {
   @Prop({ required: true })
   netWeight: number;
 
-  // 🟢 إضافة weight لضمان وجوده لشاشة الطباعة
+  // 🟢 الوزن
   @Prop({ required: true })
   weight: number;
 
@@ -43,9 +43,13 @@ export class BarcodeInvoiceItem {
   @Prop({ required: true })
   finalPrice: number; // إجمالي سعر القطعة = الذهب + المصنعية
 
-  // 🟢 إضافة itemTotal لضمان وجوده لشاشة الطباعة
+  // 🟢 إجمالي القطعة
   @Prop({ required: true })
   itemTotal: number;
+
+  // 🖼️ إضافة صور القطعة للعرض في الواجهة (للعناصر التي اشتراها الزبون فقط)
+  @Prop({ type: [String], default: [] })
+  images?: string[];
 }
 
 export const BarcodeInvoiceItemSchema =

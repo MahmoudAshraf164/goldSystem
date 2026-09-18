@@ -21,7 +21,7 @@ import { InventoryModule } from '../inventory/inventory.module';
     StockMovementsModule,
     SafeModule,
     CustomersModule,
-    InventoryModule, // 👈 تم استيراد موديل المخزون العام للسماح بتسجيل الحركة والتزامن
+    InventoryModule,
   ],
   controllers: [BarcodeSalesController],
   providers: [BarcodeSalesService],

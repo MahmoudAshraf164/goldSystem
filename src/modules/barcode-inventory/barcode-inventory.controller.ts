@@ -9,24 +9,25 @@ import {
   Query,
   UseGuards,
   Request,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
-  ApiResponse,
   ApiOkResponse,
-  ApiCreatedResponse,
-  ApiBadRequestResponse,
-  ApiNotFoundResponse,
   ApiBearerAuth,
   ApiParam,
   ApiQuery,
+  ApiConsumes,
 } from '@nestjs/swagger';
 import { BarcodeInventoryService } from './barcode-inventory.service';
 import { CreateBarcodeItemDto } from './dto/create-barcode-item.dto';
+import { UpdateBarcodeItemDto } from './dto/update-barcode-item.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
-import { UpdateBarcodeItemDto } from './dto/update-barcode-item.dto';
+import { CloudinaryService } from '../../common/cloudinary.service';
 
 @ApiTags('مخزون الباركود (Barcode Inventory)')
 @ApiBearerAuth('access-token')
@@ -35,121 +36,99 @@ import { UpdateBarcodeItemDto } from './dto/update-barcode-item.dto';
 export class BarcodeInventoryController {
   constructor(
     private readonly barcodeInventoryService: BarcodeInventoryService,
+    private readonly cloudinaryService: CloudinaryService,
   ) {}
 
   @Post()
-  @ApiOperation({
-    summary: 'إضافة قطعة ذهب جديدة للمخزون بالباركود',
-    description:
-      'تسجيل قطعة جديدة في قاعدة البيانات، وتوليد باركود تلقائي إن لم يتم إرساله، مع حساب الوزن الصافي وتسجيل حركة مخزنية.',
-  })
-  @ApiCreatedResponse({ description: 'تم إضافة القطعة للمخزون بنجاح' })
-  @ApiBadRequestResponse({ description: 'بيانات غير صالحة أو الباركود مكرر' })
-  async create(@Body() dto: CreateBarcodeItemDto, @Request() req: any) {
-    return this.barcodeInventoryService.createItem(dto, req.user.userId);
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
+  async createItem(
+    @UploadedFile() file: any,
+    @Body() dto: CreateBarcodeItemDto,
+    @Request() req: any,
+  ) {
+    let imageUrl: string | null = null;
+
+    if (file) {
+      // نحدد اسم الملف بناءً على الباركود الممرر أو نتركه يتولد تلقائياً
+      const customId = dto.barcode ? `item_${dto.barcode.trim()}` : undefined;
+      imageUrl = await this.cloudinaryService.uploadImage(
+        file,
+        'gold_barcode_items',
+        customId,
+      );
+    }
+
+    const userId = req.user?.userId || req.user?.sub;
+    return this.barcodeInventoryService.createItem(dto, userId, imageUrl);
   }
 
   @Get('scan/:barcode')
-  @ApiOperation({
-    summary: 'فحص/قراءة قطعة بواسطة الباركود',
-    description:
-      'البحث عن القطعة الذهبية عبر رمز الباركود لاسترجاع بياناتها قبل البيع أو التعديل.',
-  })
-  @ApiParam({
-    name: 'barcode',
-    description: 'رمز الباركود الخاص بالقطعة',
-    example: '20261001001',
-  })
+  @ApiOperation({ summary: 'فحص/قراءة قطعة بواسطة الباركود' })
+  @ApiParam({ name: 'barcode', example: '20261001001' })
   @ApiOkResponse({ description: 'تم العثور على القطعة بنجاح' })
-  @ApiNotFoundResponse({
-    description: 'القطعة غير موجودة بالمخزن أو مباعة/مؤرشفة',
-  })
   async scanBarcode(@Param('barcode') barcode: string) {
     return this.barcodeInventoryService.findByBarcode(barcode);
   }
 
   @Get('archived')
-  @ApiOperation({
-    summary: 'جلب قائمة القطع المؤرشفة/المحذوفة',
-    description: 'استرجاع كافة القطع التي تمت أكل أرشفتاها (Soft Delete).',
-  })
-  @ApiOkResponse({ description: 'قائمة القطع المؤرشفة' })
+  @ApiOperation({ summary: 'جلب قائمة القطع المؤرشفة/المحذوفة' })
   async findAllArchived() {
     return this.barcodeInventoryService.findAllArchived();
   }
 
   @Get()
   @ApiOperation({
-    summary: 'جلب قائمة القطع المتاحة بالمخزن للبيع',
-    description:
-      'استعراض كافة القطع المتاحة (IN_STOCK) مع إمكانية التصفية بحسب العيار.',
+    summary:
+      'جلب قائمة القطع المتاحة بالمخزن مع إمكانية التصفية بـ العيار أو التصنيف',
   })
+  @ApiQuery({ name: 'karat', required: false, enum: [18, 21, 24] })
   @ApiQuery({
-    name: 'karat',
+    name: 'category',
     required: false,
-    enum: [18, 21, 24],
-    description: 'تصفية القائمة بذكر العيار (اختياري)',
+    description: 'معرف التصنيف Mongo ObjectId',
   })
-  @ApiOkResponse({ description: 'قائمة القطع المتاحة في المخزن' })
-  async findAll(@Query('karat') karat?: string) {
+  async findAll(
+    @Query('karat') karat?: string,
+    @Query('category') category?: string,
+  ) {
     const karatNum = karat ? parseInt(karat, 10) : undefined;
-    return this.barcodeInventoryService.findAllAvailable(karatNum);
+    return this.barcodeInventoryService.findAllAvailable(karatNum, category);
   }
-
   @Put(':id')
-  @ApiOperation({
-    summary: 'تعديل بيانات قطعة بالباركود أو المعرف ID',
-    description:
-      'تحديث بيانات قطعة مخزنية محددة بواسطة المعرف ID أو رقم الباركود.',
-  })
-  @ApiParam({
-    name: 'id',
-    description: 'معرف القطعة (MongoDB ObjectId أو رقم الباركود)',
-    example: '60d5ecb8b5c9c22b4c8b4567',
-  })
-  @ApiOkResponse({ description: 'تم تحديث بيانات القطعة بنجاح' })
-  @ApiNotFoundResponse({ description: 'القطعة غير موجودة' })
-  @ApiBadRequestResponse({ description: 'بيانات التحديث غير صالحة' })
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiConsumes('multipart/form-data')
   async update(
     @Param('id') id: string,
     @Body() dto: UpdateBarcodeItemDto,
+    @UploadedFile() file: any,
     @Request() req: any,
   ) {
+    let imageUrl: string | null = null;
+
+    if (file) {
+      // استخدام ID القطعة كاسم فريد للملف يضمن استبدال الصورة القديمة بنفس الاسم
+      const customId = `item_${id}`;
+      imageUrl = await this.cloudinaryService.uploadImage(
+        file,
+        'gold_barcode_items',
+        customId,
+      );
+    }
+
     const userId = req.user?.userId || req.user?.sub;
-    return this.barcodeInventoryService.updateItem(id, dto, userId);
+    return this.barcodeInventoryService.updateItem(id, dto, userId, imageUrl);
   }
 
   @Delete(':id')
-  @ApiOperation({
-    summary: 'أرشفة/حذف مؤقت لقطعة من المخزن (Soft Delete)',
-    description:
-      'تحويل حالة القطعة إلى مؤرشفة دون حذفها نهائياً من قاعدة البيانات للحفاظ على السجلات.',
-  })
-  @ApiParam({
-    name: 'id',
-    description: 'معرف القطعة (MongoDB ObjectId)',
-    example: '60d5ecb8b5c9c22b4c8b4567',
-  })
-  @ApiOkResponse({ description: 'تم أرشفة القطعة بنجاح' })
-  @ApiNotFoundResponse({ description: 'القطعة غير موجودة' })
+  @ApiOperation({ summary: 'أرشفة/حذف مؤقت لقطعة من المخزن (Soft Delete)' })
   async remove(@Param('id') id: string, @Request() req: any) {
     await this.barcodeInventoryService.softDelete(id, req.user.userId);
     return { message: 'تم أرشفة القطعة بنجاح' };
   }
 
   @Get('print-tag/:barcode')
-  @ApiOperation({
-    summary: 'توليد صورة باركود للطباعة',
-    description:
-      'إنشاء صورة باركود (Base64 / Data URL) قابلة للطباعة على التاج اللاصق للقطعة.',
-  })
-  @ApiParam({
-    name: 'barcode',
-    description: 'رمز الباركود المراد طباعته',
-    example: '20261001001',
-  })
-  @ApiOkResponse({ description: 'صورة الباركود جاهزة للطباعة' })
-  @ApiNotFoundResponse({ description: 'القطعة غير موجودة' })
+  @ApiOperation({ summary: 'توليد صورة باركود للطباعة' })
   async getPrintTag(@Param('barcode') barcode: string) {
     return this.barcodeInventoryService.generateBarcodeImage(barcode);
   }
