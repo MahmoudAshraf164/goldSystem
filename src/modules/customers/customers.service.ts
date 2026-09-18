@@ -9,27 +9,26 @@ import { Customer } from './schemas/customer.schema';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { Invoice } from '../sales/schemas/invoice.schema';
+import { BullionSale } from '../bullion-sales/schemas/bullion-sale.schema';
 
 @Injectable()
 export class CustomersService {
   constructor(
     @InjectModel(Customer.name) public readonly customerModel: Model<Customer>,
     @InjectModel(Invoice.name) private readonly invoiceModel: Model<Invoice>,
+    @InjectModel(BullionSale.name)
+    private readonly bullionSaleModel: Model<BullionSale>,
   ) {}
 
   // 1. إنشاء عميل جديد
   async create(createCustomerDto: CreateCustomerDto): Promise<Customer> {
     const payload: any = { ...createCustomerDto };
-
-    // 👈 معالجة القيمة: إذا كانت null أو نص فارغ أو تحتوي على مسافات فقط
     if (
       payload.phoneNumber &&
       typeof payload.phoneNumber === 'string' &&
       payload.phoneNumber.trim() !== ''
     ) {
       payload.phoneNumber = payload.phoneNumber.trim();
-
-      // فحص التكرار برمجياً للإرجاع استثناء واضح
       const existing = await this.customerModel.findOne({
         phoneNumber: payload.phoneNumber,
       });
@@ -39,46 +38,12 @@ export class CustomersService {
         );
       }
     } else {
-      // 👈 الحل الجذري: حذف الحقل تماماً من الكائن حتى لا يصل null إلى MongoDB
       delete payload.phoneNumber;
     }
-
     const newCustomer = new this.customerModel(payload);
     return newCustomer.save();
   }
 
-  // أضف هذه الدالة داخل CustomersService في ملف customers.service.ts
-
-  async findOrCreateCustomer(
-    fullName: string,
-    phoneNumber?: string,
-    session?: any,
-  ): Promise<Customer> {
-    const trimmedName = fullName.trim();
-    const trimmedPhone = phoneNumber?.trim();
-
-    // 1. البحث أولاً برقم الهاتف إن وجد
-    if (trimmedPhone) {
-      const existingByPhone = await this.customerModel
-        .findOne({ phoneNumber: trimmedPhone, status: 'ACTIVE' })
-        .session(session);
-      if (existingByPhone) return existingByPhone;
-    }
-
-    // 2. البحث بالاسم فقط
-    const existingByName = await this.customerModel
-      .findOne({ fullName: trimmedName, status: 'ACTIVE' })
-      .session(session);
-    if (existingByName) return existingByName;
-
-    // 3. إنشاء عميل جديد إن لم يوجد
-    const newCustomer = new this.customerModel({
-      fullName: trimmedName,
-      phoneNumber: trimmedPhone || undefined,
-    });
-
-    return newCustomer.save({ session });
-  }
   // 2. جلب العملاء مع البحث والفلترة
   async findAll(
     status: string = 'ACTIVE',
@@ -98,7 +63,7 @@ export class CustomersService {
     return this.customerModel.find(filter).sort({ createdAt: -1 }).exec();
   }
 
-  // 3. جلب عميل محدد بالـ ID
+  // 3. جلب عميل محدد بالـ ID (تم إضافتها هنا لتفادي خطأ عدم وجودها)
   async findById(id: string): Promise<Customer> {
     const customer = await this.customerModel
       .findOne({ _id: id, status: 'ACTIVE' })
@@ -109,33 +74,75 @@ export class CustomersService {
     return customer;
   }
 
-  // 4. جلب سجل الفواتير والمشتريات الكامل للعميل
+  // 4. جلب سجل الفواتير والمشتريات الكامل للعميل (جديد + سبايك)
   async getCustomerStatement(customerId: string) {
     const customer = await this.findById(customerId);
 
-    const invoices = await this.invoiceModel
+    // استخدام lean<any>() لتجاوز قيود الأنواع (TypeScript) مع حقول التواريخ
+    const standardInvoices = (await this.invoiceModel
       .find({ customer: customerId })
       .populate('items.inventoryItem', 'title karat')
       .populate('soldBy', 'fullName role')
-      .sort({ createdAt: -1 })
-      .exec();
+      .lean()
+      .exec()) as any[];
 
-    const totalSpent = invoices
-      .filter((inv) => inv.status === 'COMPLETED')
-      .reduce((sum, inv) => sum + inv.totalPrice, 0);
+    const bullionSales = (await this.bullionSaleModel
+      .find({ customer: customerId })
+      .populate('seller', 'fullName role')
+      .lean()
+      .exec()) as any[];
 
-    const totalWeightBought = invoices
-      .filter((inv) => inv.status === 'COMPLETED')
-      .reduce((sum, inv) => sum + inv.totalInvoiceNetWeight, 0);
+    const formattedStandard = standardInvoices.map((inv) => ({
+      ...inv,
+      invoiceType: 'STANDARD',
+      displayNumber: inv.invoiceNumber,
+      displayTotal: inv.totalPrice,
+      displayWeight: inv.totalInvoiceNetWeight || 0,
+      date: inv.createdAt,
+    }));
+
+    const formattedBullion = bullionSales.map((sale) => ({
+      ...sale,
+      invoiceType: 'BULLION',
+      displayNumber: sale.invoiceNumber,
+      displayTotal: sale.grandTotal,
+      displayWeight: sale.totalGoldWeight || 0,
+      date: sale.createdAt,
+    }));
+
+    const allInvoices = [...formattedStandard, ...formattedBullion].sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+    );
+
+    const completedStandard = standardInvoices.filter(
+      (inv) => inv.status !== 'CANCELLED',
+    );
+    const completedBullion = bullionSales.filter(
+      (sale) => sale.status !== 'CANCELLED',
+    );
+
+    const totalSpent =
+      completedStandard.reduce((sum, inv) => sum + (inv.totalPrice || 0), 0) +
+      completedBullion.reduce((sum, sale) => sum + (sale.grandTotal || 0), 0);
+
+    const totalWeightBought =
+      completedStandard.reduce(
+        (sum, inv) => sum + (inv.totalInvoiceNetWeight || 0),
+        0,
+      ) +
+      completedBullion.reduce(
+        (sum, sale) => sum + (sale.totalGoldWeight || 0),
+        0,
+      );
 
     return {
       customer,
       summary: {
-        totalInvoicesCount: invoices.length,
+        totalInvoicesCount: allInvoices.length,
         totalSpentMoney: totalSpent,
         totalNetWeightBought: parseFloat(totalWeightBought.toFixed(3)),
       },
-      invoices,
+      invoices: allInvoices,
     };
   }
 
@@ -145,7 +152,6 @@ export class CustomersService {
     updateCustomerDto: UpdateCustomerDto,
   ): Promise<Customer> {
     const payload: any = { ...updateCustomerDto };
-
     if (payload.phoneNumber !== undefined) {
       if (
         payload.phoneNumber &&
@@ -153,7 +159,6 @@ export class CustomersService {
         payload.phoneNumber.trim() !== ''
       ) {
         payload.phoneNumber = payload.phoneNumber.trim();
-
         const existing = await this.customerModel.findOne({
           phoneNumber: payload.phoneNumber,
           _id: { $ne: id },
@@ -164,7 +169,6 @@ export class CustomersService {
           );
         }
       } else {
-        // إذا قام المستخدم بمسح الرقم في التحديث، نستخدم $unset لحذفه تماماً من دكيومنت MongoDB
         delete payload.phoneNumber;
         const updatedCustomerUnset = await this.customerModel
           .findByIdAndUpdate(
@@ -173,22 +177,18 @@ export class CustomersService {
             { new: true },
           )
           .exec();
-
         if (!updatedCustomerUnset) {
           throw new NotFoundException('العميل غير موجود');
         }
         return updatedCustomerUnset;
       }
     }
-
     const updatedCustomer = await this.customerModel
       .findByIdAndUpdate(id, payload, { new: true })
       .exec();
-
     if (!updatedCustomer) {
       throw new NotFoundException('العميل غير موجود');
     }
-
     return updatedCustomer;
   }
 
@@ -198,7 +198,6 @@ export class CustomersService {
       { _id: id, status: 'ACTIVE' },
       { status: 'ARCHIVED' },
     );
-
     if (result.matchedCount === 0) {
       throw new NotFoundException('العميل غير موجود أو مؤرشف بالفعل');
     }

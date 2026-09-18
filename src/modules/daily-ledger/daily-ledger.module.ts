@@ -20,7 +20,11 @@ import {
 import {
   ScrapPurchase,
   ScrapPurchaseSchema,
-} from '../scrap-purchases/schemas/scrap-purchases.schema'; // 👈 استيراد موديل شراء الكسر
+} from '../scrap-purchases/schemas/scrap-purchases.schema';
+import {
+  SupplierTransaction,
+  SupplierTransactionSchema,
+} from '../suppliers/schemas/supplier-transaction.schema';
 
 @Module({
   imports: [
@@ -31,7 +35,8 @@ import {
       { name: Expense.name, schema: ExpenseSchema },
       { name: BullionSale.name, schema: BullionSaleSchema },
       { name: BarcodeInvoice.name, schema: BarcodeInvoiceSchema },
-      { name: ScrapPurchase.name, schema: ScrapPurchaseSchema }, // 👈 تسجيل الموديل هنا
+      { name: ScrapPurchase.name, schema: ScrapPurchaseSchema },
+      { name: SupplierTransaction.name, schema: SupplierTransactionSchema },
     ]),
   ],
   controllers: [DailyLedgerController],

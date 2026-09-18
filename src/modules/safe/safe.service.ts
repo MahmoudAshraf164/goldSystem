@@ -75,6 +75,14 @@ export class SafeService implements OnModuleInit {
   async getSafeStatus(): Promise<Safe> {
     return this.getSafeInstance();
   }
+  async deductCash(
+    amount: number,
+    reason: string,
+    userId: string,
+  ): Promise<void> {
+    const safe = await this.getSafeInstance();
+    await this.updateSafeState(safe, -amount, 'OUTFLOW', reason, userId);
+  }
 
   async setupSafePassword(dto: SetupSafePasswordDto) {
     const safe = await this.getSafeInstance();

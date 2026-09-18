@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  ConflictException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ScrapPurchase } from './schemas/scrap-purchases.schema';
@@ -16,40 +20,81 @@ export class ScrapPurchasesService {
     private readonly safeService: SafeService,
   ) {}
 
-  // 1. تسجيل عملية شراء ذهب كسر جديدة
+  // دالة ذكية لتوليد أحدث رقم تسلسلي بناءً على آخر فاتورة موجودة
+  private async generateNextPurchaseNumber(): Promise<string> {
+    const lastPurchase = await this.scrapPurchaseModel
+      .findOne({}, { purchaseNumber: 1 })
+      .sort({ createdAt: -1, _id: -1 })
+      .exec();
+
+    if (!lastPurchase || !lastPurchase.purchaseNumber) {
+      return 'SCRAP-1001';
+    }
+
+    const currentNumber = parseInt(
+      lastPurchase.purchaseNumber.replace('SCRAP-', ''),
+      10,
+    );
+    const nextNumber = isNaN(currentNumber) ? 1001 : currentNumber + 1;
+
+    return `SCRAP-${nextNumber}`;
+  }
+
+  // 1. تسجيل عملية شراء ذهب كسر جديدة مع نظام حماية وتكرار (Retry)
   async createPurchase(
     dto: CreateScrapPurchaseDto,
     userId: string,
   ): Promise<ScrapPurchase> {
-    const count = await this.scrapPurchaseModel.countDocuments();
-    const purchaseNumber = `SCRAP-${1001 + count}`;
+    const maxRetries = 3;
+    let attempt = 0;
 
-    const newPurchase = new this.scrapPurchaseModel({
-      ...dto,
-      purchaseNumber,
-      actionBy: new Types.ObjectId(userId),
-    });
+    while (attempt < maxRetries) {
+      try {
+        const purchaseNumber = await this.generateNextPurchaseNumber();
 
-    const savedPurchase = await newPurchase.save();
+        const newPurchase = new this.scrapPurchaseModel({
+          ...dto,
+          purchaseNumber,
+          actionBy: new Types.ObjectId(userId),
+        });
 
-    // أ) تحديث مخزون الذهب الكسر تلقائياً (زيادة الوزن بالعيار)
-    await this.scrapGoldService.buyScrap(
-      {
-        karat: dto.karat,
-        weight: dto.weight,
-      },
-      userId,
-    );
+        const savedPurchase = await newPurchase.save();
 
-    // ب) خصم المبلغ المالي فوراً من الخزنة (سيسمع تلقائياً في اليومية)
-    await this.safeService.triggerTransaction(
-      dto.totalPrice,
-      'OUTFLOW',
-      `شراء ذهب كسر رقم ${purchaseNumber} (وزن ${dto.weight}ج عيار ${dto.karat})`,
-      userId,
-    );
+        // أ) تحديث مخزون الذهب الكسر تلقائياً (زيادة الوزن بالعيار)
+        await this.scrapGoldService.buyScrap(
+          {
+            karat: dto.karat,
+            weight: dto.weight,
+          },
+          userId,
+        );
 
-    return savedPurchase;
+        // ب) خصم المبلغ المالي فوراً من الخزنة
+        await this.safeService.triggerTransaction(
+          dto.totalPrice,
+          'OUTFLOW',
+          `شراء ذهب كسر رقم ${purchaseNumber} (وزن ${dto.weight}ج عيار ${dto.karat})`,
+          userId,
+        );
+
+        return savedPurchase;
+      } catch (err: unknown) {
+        const error = err as { code?: number };
+        // إذا حدث تكرار بسبب الضغط المتزامن، أعد المحاولة تلقائياً برقم جديد
+        if (error.code === 11000 && attempt < maxRetries - 1) {
+          attempt++;
+          continue;
+        }
+        if (error.code === 11000) {
+          throw new ConflictException(
+            'حدث تكرار في رقم الفاتورة، يرجى المحاولة مرة أخرى.',
+          );
+        }
+        throw err;
+      }
+    }
+
+    throw new ConflictException('فشل في إنشاء رقم فاتورة فريد، يرجى المحاولة مرة أخرى.');
   }
 
   // 2. جلب جميع عمليات شراء الكسر
@@ -75,7 +120,7 @@ export class ScrapPurchasesService {
     return purchase;
   }
 
-  // 4. تعديل عملية شراء كسر وتسوية الخزنة والمخزن أوتوماتيكياً
+  // 4. 🛠️ تعديل عملية شراء كسر وتسوية الخزنة والمخزن أوتوماتيكياً
   async updatePurchase(
     id: string,
     dto: UpdateScrapPurchaseDto,
@@ -94,10 +139,8 @@ export class ScrapPurchasesService {
     const newWeight = dto.weight ?? oldWeight;
     const newPrice = dto.totalPrice ?? oldPrice;
 
-    // أ) تعديل تسوية الخزنة بناءً على الفارق المالي
     const priceDiff = newPrice - oldPrice;
     if (priceDiff > 0) {
-      // زيادة في المبلغ المدفوع -> خصم إضافي من الخزنة
       await this.safeService.triggerTransaction(
         priceDiff,
         'OUTFLOW',
@@ -105,7 +148,6 @@ export class ScrapPurchasesService {
         userId,
       );
     } else if (priceDiff < 0) {
-      // نقص في المبلغ المدفوع -> استرداد المتبقي للخزنة
       const refund = Math.abs(priceDiff);
       await this.safeService.triggerTransaction(
         refund,
@@ -115,7 +157,6 @@ export class ScrapPurchasesService {
       );
     }
 
-    // ب) تعديل تسوية المخزن (الوزن والعيار)
     if (oldKarat === newKarat) {
       const weightDiff = newWeight - oldWeight;
       if (weightDiff !== 0) {
@@ -125,24 +166,21 @@ export class ScrapPurchasesService {
         );
       }
     } else {
-      // خصم الوزن القديم من العيار القديم
       await this.scrapGoldService.buyScrap(
         { karat: oldKarat, weight: -oldWeight },
         userId,
       );
-      // إضافة الوزن الجديد للعيار الجديد
       await this.scrapGoldService.buyScrap(
         { karat: newKarat, weight: newWeight },
         userId,
       );
     }
 
-    // ج) حفظ التعديلات الجديدة
     Object.assign(existing, dto, { actionBy: new Types.ObjectId(userId) });
     return existing.save();
   }
 
-  // 5. حذف عملية شراء كسر وإرجاع الكاش ورد الوزن من المخزن
+  // 5. 🛠️ حذف عملية شراء كسر وإرجاع الكاش ورد الوزن من المخزن
   async deletePurchase(
     id: string,
     userId: string,
@@ -152,7 +190,6 @@ export class ScrapPurchasesService {
       throw new NotFoundException('عملية شراء الكسر المراد حذفها غير موجودة');
     }
 
-    // أ) إرجاع النقدية بالكامل للخزنة (INFLOW)
     await this.safeService.triggerTransaction(
       purchase.totalPrice,
       'INFLOW',
@@ -160,7 +197,6 @@ export class ScrapPurchasesService {
       userId,
     );
 
-    // ب) خصم الجرامات المضافة سابقاً من مخزون الكسر
     await this.scrapGoldService.buyScrap(
       {
         karat: purchase.karat,
@@ -169,7 +205,6 @@ export class ScrapPurchasesService {
       userId,
     );
 
-    // ج) مسح الفاتورة من القاعدة
     await this.scrapPurchaseModel.findByIdAndDelete(id).exec();
 
     return {

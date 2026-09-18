@@ -6,13 +6,18 @@ import { ExpensesModule } from '../expenses/expenses.module';
 import {
   ScrapPurchase,
   ScrapPurchaseSchema,
-} from '../scrap-purchases/schemas/scrap-purchases.schema'; // 👈 استيراد الموديل
+} from '../scrap-purchases/schemas/scrap-purchases.schema';
+import {
+  SupplierTransaction,
+  SupplierTransactionSchema,
+} from '../suppliers/schemas/supplier-transaction.schema';
 
 @Module({
   imports: [
-    ExpensesModule, // يقرأ المصاريف العامة
+    ExpensesModule,
     MongooseModule.forFeature([
-      { name: ScrapPurchase.name, schema: ScrapPurchaseSchema }, // 👈 تسجيل موديل شراء الكسر
+      { name: ScrapPurchase.name, schema: ScrapPurchaseSchema },
+      { name: SupplierTransaction.name, schema: SupplierTransactionSchema },
     ]),
   ],
   controllers: [PurchasesLedgerController],
