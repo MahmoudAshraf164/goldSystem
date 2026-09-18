@@ -33,6 +33,10 @@ export class SuppliersService {
   }
 
   async getSupplierStatement(supplierId: string) {
+    if (!Types.ObjectId.isValid(supplierId)) {
+      throw new BadRequestException('معرف المورد غير صالح');
+    }
+
     const supplier = await this.supplierModel.findById(supplierId).exec();
     if (!supplier) throw new NotFoundException('المورد غير موجود');
 
@@ -51,8 +55,11 @@ export class SuppliersService {
     };
   }
 
-  // 👈 دالة تعديل بيانات المورد
   async updateSupplier(id: string, dto: UpdateSupplierDto): Promise<Supplier> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('معرف المورد غير صالح');
+    }
+
     const updatedSupplier = await this.supplierModel
       .findByIdAndUpdate(id, dto, { new: true })
       .exec();
@@ -64,21 +71,23 @@ export class SuppliersService {
     return updatedSupplier;
   }
 
-  // 👈 دالة حذف المورد
   async deleteSupplier(id: string): Promise<{ message: string }> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('معرف المورد غير صالح');
+    }
+
     const supplier = await this.supplierModel.findById(id).exec();
     if (!supplier) {
       throw new NotFoundException('المورد غير موجود');
     }
 
-    // (اختياري) يمكنك منع الحذف إذا كانت لديه معاملات سابقة حفاظاً على البيانات المالية
     const hasTransactions = await this.transactionModel.exists({
       supplierId: new Types.ObjectId(id),
     });
 
     if (hasTransactions) {
       throw new BadRequestException(
-        'لا يمكن حذف المورد لوجود معاملات مالية سابقة مرتبطة به، يمكنك مراجعة البيانات بدلاً من ذلك.',
+        'لا يمكن حذف المورد لوجود معاملات مالية سابقة مرتبطة به.',
       );
     }
 
@@ -90,11 +99,19 @@ export class SuppliersService {
     dto: RecordSupplierTransactionDto,
     userId: string,
   ): Promise<SupplierTransaction> {
+    if (!Types.ObjectId.isValid(dto.supplierId)) {
+      throw new BadRequestException('معرف المورد غير صالح');
+    }
+
     const supplier = await this.supplierModel.findById(dto.supplierId);
     if (!supplier) throw new NotFoundException('المورد غير موجود');
 
     let totalGoodsValue = 0;
-    let totalGoodsWeightByKarat = { 24: 0, 21: 0, 18: 0 };
+    const totalGoodsWeightByKarat: Record<number, number> = {
+      24: 0,
+      21: 0,
+      18: 0,
+    };
 
     if (dto.receivedItems && dto.receivedItems.length > 0) {
       for (const item of dto.receivedItems) {
@@ -148,7 +165,10 @@ export class SuppliersService {
         scrapPaid: [],
         manufacturingFeePaid: 0,
       },
-      actionBy: userId,
+      actionBy: Types.ObjectId.isValid(userId)
+        ? new Types.ObjectId(userId)
+        : userId,
+      notes: dto.notes,
     });
     await transaction.save();
 
@@ -156,13 +176,17 @@ export class SuppliersService {
 
     for (const karatKey of [18, 21, 24]) {
       const weightReceived = totalGoodsWeightByKarat[karatKey] || 0;
-      supplier.goldBalances[`karat${karatKey}`] += weightReceived;
+      const propKey = `karat${karatKey}` as keyof typeof supplier.goldBalances;
+      supplier.goldBalances[propKey] =
+        (supplier.goldBalances[propKey] || 0) + weightReceived;
     }
 
     if (dto.paymentDetails?.scrapPaid) {
       for (const scrap of dto.paymentDetails.scrapPaid) {
-        if (supplier.goldBalances[`karat${scrap.karat}`] !== undefined) {
-          supplier.goldBalances[`karat${scrap.karat}`] -= scrap.weight;
+        const propKey =
+          `karat${scrap.karat}` as keyof typeof supplier.goldBalances;
+        if (supplier.goldBalances[propKey] !== undefined) {
+          supplier.goldBalances[propKey] -= scrap.weight;
         }
       }
     }

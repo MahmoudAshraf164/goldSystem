@@ -5,10 +5,12 @@ import {
   IsArray,
   IsOptional,
   ValidateNested,
+  IsMongoId,
+  IsIn,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
-class ReceivedItemDto {
+export class ReceivedItemDto {
   @IsNumber() karat: number;
   @IsNumber() weight: number;
   @IsNumber() pricePerGram: number;
@@ -16,31 +18,35 @@ class ReceivedItemDto {
   @IsNumber() totalPrice: number;
 }
 
-class ScrapPaidDto {
+export class ScrapPaidDto {
   @IsNumber() karat: number;
   @IsNumber() weight: number;
   @IsNumber() pricePerGram: number;
   @IsNumber() totalValue: number;
 }
 
-class PaymentDetailsDto {
+export class PaymentDetailsDto {
   @IsNumber() @IsOptional() cashPaid?: number;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => ScrapPaidDto)
   @IsOptional()
   scrapPaid?: ScrapPaidDto[];
+
   @IsNumber() @IsOptional() manufacturingFeePaid?: number;
 }
 
 export class RecordSupplierTransactionDto {
-  @IsString()
+  // 🟢 حماية الـ MongoId من النصوص الفارغة
+  @IsMongoId({ message: 'معرف المورد غير صالح' })
   @IsNotEmpty()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   supplierId: string;
 
   @IsString()
-  @IsNotEmpty()
-  type: string; // 'GOODS_RECEIVE' | 'PAYMENT'
+  @IsIn(['GOODS_RECEIVE', 'PAYMENT', 'ADJUSTMENT'])
+  type: string;
 
   @IsArray()
   @ValidateNested({ each: true })

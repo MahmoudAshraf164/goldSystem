@@ -7,17 +7,16 @@ export class SupplierTransaction extends Document {
   supplierId: Types.ObjectId;
 
   @Prop({ required: true, enum: ['GOODS_RECEIVE', 'PAYMENT', 'ADJUSTMENT'] })
-  type: string; // نوع الحركة: استلام بضاعة جديدة، أو سداد للمورد، أو تسوية
+  type: string;
 
-  // 1. البضاعة المستلمة من المورد (ذهب جديد / مشغولات)
   @Prop({
     type: [
       {
         karat: { type: Number, required: true },
-        weight: { type: Number, required: true }, // الوزن القائم أو الصافي
-        pricePerGram: { type: Number, required: true }, // سعر جرام الذهب يومها
-        manufacturingFeePerGram: { type: Number, default: 0 }, // الأجر / المصنعية للجرام
-        totalPrice: { type: Number, required: true }, // إجمالي السعر + المصنعية
+        weight: { type: Number, required: true },
+        pricePerGram: { type: Number, required: true },
+        manufacturingFeePerGram: { type: Number, default: 0 },
+        totalPrice: { type: Number, required: true },
       },
     ],
     default: [],
@@ -30,19 +29,18 @@ export class SupplierTransaction extends Document {
     totalPrice: number;
   }>;
 
-  // 2. المدفوعات المقدمة للمورد (طريقة السداد: كسر أو كاش)
   @Prop({
     type: {
-      cashPaid: { type: Number, default: 0 }, // الفلوس الكاش المدفوعة
+      cashPaid: { type: Number, default: 0 },
       scrapPaid: [
         {
           karat: { type: Number, required: true },
-          weight: { type: Number, required: true }, // وزن الذهب الكسر المسدد
-          pricePerGram: { type: Number, required: true }, // سعر جرام الكسر يومها
-          totalValue: { type: Number, required: true }, // قيمة الكسر الإجمالية
+          weight: { type: Number, required: true },
+          pricePerGram: { type: Number, required: true },
+          totalValue: { type: Number, required: true },
         },
       ],
-      manufacturingFeePaid: { type: Number, default: 0 }, // أجر المصنعية المدفوع نقداً للمورد
+      manufacturingFeePaid: { type: Number, default: 0 },
     },
     default: { cashPaid: 0, scrapPaid: [], manufacturingFeePaid: 0 },
   })
@@ -58,10 +56,11 @@ export class SupplierTransaction extends Document {
   };
 
   @Prop()
-  notes: string; // ملاحظات (مثل رقم إيصال، تفاصيل الاتفاق)
+  notes: string;
 
+  // 🟢 تعديل النوع هنا ليكون Types.ObjectId متوافق مع المونجو
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-  actionBy: string; // المستخدم اللي عمل الحركة
+  actionBy: Types.ObjectId;
 }
 
 export const SupplierTransactionSchema =
