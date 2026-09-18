@@ -107,7 +107,25 @@ export class BarcodeSalesService {
     await parentInventory.save({ session });
   }
 
-  // 1. إتمام عملية البيع بالباركود وإصدار الفاتورة
+  /**
+   * دالة مساعدة لاستخراج صور القطعة من كائن الباركود (imageUrl) أو المظلة الأم
+   */
+  private extractItemImages(item: any): string[] {
+    const rawItem = item?.toObject ? item.toObject() : item || {};
+    const parentInv = rawItem.inventoryRef || {};
+
+    const singleImage =
+      rawItem.imageUrl ||
+      rawItem.image ||
+      (Array.isArray(rawItem.images) && rawItem.images[0]) ||
+      parentInv.imageUrl ||
+      parentInv.image ||
+      (Array.isArray(parentInv.images) && parentInv.images[0]) ||
+      null;
+
+    return singleImage ? [singleImage] : [];
+  }
+
   // 1. إتمام عملية البيع بالباركود وإصدار الفاتورة
   async createInvoice(
     dto: CreateBarcodeInvoiceDto,
@@ -166,7 +184,10 @@ export class BarcodeSalesService {
       for (const saleItem of dto.items) {
         const item = await this.barcodeInventoryModel
           .findOne({ barcode: saleItem.barcode.trim(), isArchived: false })
-          .populate('inventoryRef')
+          .populate({
+            path: 'inventoryRef',
+            select: 'imageUrl images image',
+          })
           .session(session)
           .exec();
 
@@ -196,13 +217,8 @@ export class BarcodeSalesService {
           (goldTotalPrice + totalMakingCharge).toFixed(2),
         );
 
-        // 🖼️ جلب صور القطعة من قطعة الباركود أو من المخزون الأب إن وجدت
-        const itemImages: string[] =
-          (item as any).images && (item as any).images.length > 0
-            ? (item as any).images
-            : (item as any).image
-              ? [(item as any).image]
-              : (item.inventoryRef as any)?.images || [];
+        // 🖼️ استخراج صورة القطعة المفردة في مصفوفة
+        const itemImages = this.extractItemImages(item);
 
         processedItems.push({
           item: item._id as Types.ObjectId,
@@ -217,7 +233,7 @@ export class BarcodeSalesService {
           totalMakingCharge,
           finalPrice,
           itemTotal: finalPrice,
-          images: itemImages, // 🟢 ربط الصور الخاصة بالقطعة المباعة
+          images: itemImages,
         });
 
         grandTotalNetWeight = parseFloat(
@@ -298,16 +314,35 @@ export class BarcodeSalesService {
     }
   }
 
-  // 2. جلب جميع الفواتير
+  // 2. جلب جميع الفواتير (مع معالجة الصور للفواتير)
   async findAllInvoices(): Promise<BarcodeInvoice[]> {
     const invoices = await this.invoiceModel
       .find({ isCancelled: false })
       .populate('createdBy', 'fullName name email')
       .populate('customer', 'fullName phoneNumber')
+      .populate({
+        path: 'items.item',
+        select: 'imageUrl images image inventoryRef',
+        populate: {
+          path: 'inventoryRef',
+          select: 'imageUrl images image',
+        },
+      })
       .sort({ createdAt: -1 })
       .exec();
 
-    return Array.isArray(invoices) ? invoices : [];
+    if (!Array.isArray(invoices)) return [];
+
+    return invoices.map((inv) => {
+      const invObj = inv.toObject ? inv.toObject() : inv;
+      invObj.items = invObj.items.map((it: any) => {
+        if (!it.images || it.images.length === 0) {
+          it.images = this.extractItemImages(it.item);
+        }
+        return it;
+      });
+      return invObj;
+    });
   }
 
   // 3. جلب تفاصيل فاتورة بالـ ID
@@ -320,13 +355,29 @@ export class BarcodeSalesService {
       .findById(id)
       .populate('createdBy', 'fullName name email')
       .populate('customer', 'fullName phoneNumber')
+      .populate({
+        path: 'items.item',
+        select: 'imageUrl images image inventoryRef',
+        populate: {
+          path: 'inventoryRef',
+          select: 'imageUrl images image',
+        },
+      })
       .exec();
 
     if (!invoice) {
       throw new NotFoundException('فاتورة المبيعات المطلوبة غير موجودة');
     }
 
-    return invoice;
+    const invObj = invoice.toObject ? invoice.toObject() : invoice;
+    invObj.items = invObj.items.map((it: any) => {
+      if (!it.images || it.images.length === 0) {
+        it.images = this.extractItemImages(it.item);
+      }
+      return it;
+    });
+
+    return invObj;
   }
 
   // 4. تعديل الفاتورة
@@ -427,7 +478,10 @@ export class BarcodeSalesService {
         const trimmedBarcode = saleItem.barcode.trim();
         const item = await this.barcodeInventoryModel
           .findOne({ barcode: trimmedBarcode, isArchived: false })
-          .populate('inventoryRef')
+          .populate({
+            path: 'inventoryRef',
+            select: 'imageUrl images image',
+          })
           .session(session)
           .exec();
 
@@ -496,12 +550,7 @@ export class BarcodeSalesService {
           (goldTotalPrice + totalMakingCharge).toFixed(2),
         );
 
-        const itemImages: string[] =
-          (item as any).images && (item as any).images.length > 0
-            ? (item as any).images
-            : (item as any).image
-              ? [(item as any).image]
-              : (item.inventoryRef as any)?.images || [];
+        const itemImages = this.extractItemImages(item);
 
         processedItems.push({
           item: item._id as Types.ObjectId,

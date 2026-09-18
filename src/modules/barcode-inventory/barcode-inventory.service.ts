@@ -4,8 +4,8 @@ import {
   ConflictException,
   BadRequestException,
 } from '@nestjs/common';
-import { InjectModel } from '@nestjs/mongoose';
-import { Model, Types } from 'mongoose';
+import { InjectModel, InjectConnection } from '@nestjs/mongoose';
+import { Model, Types, Connection } from 'mongoose';
 import {
   BarcodeInventory,
   BarcodeInventoryDocument,
@@ -27,6 +27,7 @@ export class BarcodeInventoryService {
     private readonly barcodeInventoryModel: Model<BarcodeInventoryDocument>,
     @InjectModel(Inventory.name)
     private readonly inventoryModel: Model<InventoryDocument>,
+    @InjectConnection() private readonly connection: Connection,
     private readonly movementsService: StockMovementsService,
   ) {}
 
@@ -63,6 +64,30 @@ export class BarcodeInventoryService {
     return tags;
   }
 
+  /**
+   * دالة مساعدة لتوفير الصورة بداخل مصفوفة images للتوافق مع الفواتير والـ Frontend
+   */
+  private formatItemWithImages(itemDoc: any): any {
+    if (!itemDoc) return itemDoc;
+    const item = itemDoc.toObject ? itemDoc.toObject() : itemDoc;
+    const parentInv = item.inventoryRef || {};
+
+    // أخذ الصورة المفردة من القطعة أو من المخزون الأم عند عدم وجودها
+    const singleImage =
+      item.imageUrl ||
+      item.image ||
+      parentInv.imageUrl ||
+      parentInv.image ||
+      (Array.isArray(parentInv.images) && parentInv.images[0]) ||
+      null;
+
+    return {
+      ...item,
+      imageUrl: singleImage,
+      images: singleImage ? [singleImage] : [],
+    };
+  }
+
   // 1. إضافة قطعة جديدة
   async createItem(
     dto: CreateBarcodeItemDto,
@@ -97,83 +122,99 @@ export class BarcodeInventoryService {
         ? dto.companyName.trim()
         : '-';
 
-    let inventoryItem: InventoryDocument | null = null;
+    const session = await this.connection.startSession();
+    session.startTransaction();
 
-    if (dto.inventoryId) {
-      inventoryItem = await this.inventoryModel
-        .findOne({ _id: dto.inventoryId, isArchived: false })
-        .exec();
-    } else {
-      const filter: any = {
-        karat: dto.karat,
-        companyName: cleanedCompanyName,
-        isArchived: false,
-      };
-      if (dto.category) filter.category = new Types.ObjectId(dto.category);
-      inventoryItem = await this.inventoryModel.findOne(filter).exec();
-    }
+    try {
+      let inventoryItem: InventoryDocument | null = null;
 
-    if (!inventoryItem) {
-      inventoryItem = new this.inventoryModel({
-        title: dto.title,
-        companyName: cleanedCompanyName,
-        category: dto.category ? new Types.ObjectId(dto.category) : null,
-        karat: dto.karat,
-        initialCount: 1,
-        currentCount: 1,
-        initialGrossWeight: dto.grossWeight,
-        totalGrossWeight: dto.grossWeight,
-        totalNetWeight: netWeight,
-        tagDetails: tagWeight > 0 ? [{ count: 1, weight: tagWeight }] : [],
-      });
-    } else {
-      inventoryItem.initialCount += 1;
-      inventoryItem.currentCount += 1;
-      inventoryItem.initialGrossWeight = parseFloat(
-        (inventoryItem.initialGrossWeight + dto.grossWeight).toFixed(3),
-      );
-      inventoryItem.totalGrossWeight = parseFloat(
-        (inventoryItem.totalGrossWeight + dto.grossWeight).toFixed(3),
-      );
-      inventoryItem.totalNetWeight = parseFloat(
-        (inventoryItem.totalNetWeight + netWeight).toFixed(3),
-      );
-
-      if (tagWeight > 0) {
-        inventoryItem.tagDetails = this.updateTagDetailsList(
-          inventoryItem.tagDetails,
-          tagWeight,
-          1,
-        );
+      if (dto.inventoryId) {
+        inventoryItem = await this.inventoryModel
+          .findOne({ _id: dto.inventoryId, isArchived: false })
+          .session(session)
+          .exec();
+      } else {
+        const filter: any = {
+          karat: dto.karat,
+          companyName: cleanedCompanyName,
+          isArchived: false,
+        };
+        if (dto.category) filter.category = new Types.ObjectId(dto.category);
+        inventoryItem = await this.inventoryModel
+          .findOne(filter)
+          .session(session)
+          .exec();
       }
+
+      if (!inventoryItem) {
+        inventoryItem = new this.inventoryModel({
+          title: dto.title,
+          companyName: cleanedCompanyName,
+          category: dto.category ? new Types.ObjectId(dto.category) : null,
+          karat: dto.karat,
+          initialCount: 1,
+          currentCount: 1,
+          initialGrossWeight: dto.grossWeight,
+          totalGrossWeight: dto.grossWeight,
+          totalNetWeight: netWeight,
+          tagDetails: tagWeight > 0 ? [{ count: 1, weight: tagWeight }] : [],
+        });
+      } else {
+        inventoryItem.initialCount += 1;
+        inventoryItem.currentCount += 1;
+        inventoryItem.initialGrossWeight = parseFloat(
+          (inventoryItem.initialGrossWeight + dto.grossWeight).toFixed(3),
+        );
+        inventoryItem.totalGrossWeight = parseFloat(
+          (inventoryItem.totalGrossWeight + dto.grossWeight).toFixed(3),
+        );
+        inventoryItem.totalNetWeight = parseFloat(
+          (inventoryItem.totalNetWeight + netWeight).toFixed(3),
+        );
+
+        if (tagWeight > 0) {
+          inventoryItem.tagDetails = this.updateTagDetailsList(
+            inventoryItem.tagDetails,
+            tagWeight,
+            1,
+          );
+        }
+      }
+
+      const savedInventory = await inventoryItem.save({ session });
+
+      const newItem = new this.barcodeInventoryModel({
+        ...dto,
+        barcode: finalBarcode,
+        tagWeight,
+        netWeight,
+        imageUrl: imageUrl || (dto as any).imageUrl || null,
+        companyName: cleanedCompanyName,
+        status: 'AVAILABLE',
+        inventoryRef: savedInventory._id,
+      });
+
+      const saved = await newItem.save({ session });
+
+      await this.movementsService.logMovement({
+        inventoryItem: savedInventory._id.toString(),
+        type: 'INVENTORY_IN',
+        countChange: 1,
+        grossWeightChange: saved.grossWeight,
+        netWeightChange: saved.netWeight,
+        actionBy: userId,
+        reason: `إدخال قطعة باركود جديدة [${saved.barcode}] - ${saved.title}`,
+      });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return this.formatItemWithImages(saved);
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
     }
-
-    const savedInventory = await inventoryItem.save();
-
-    const newItem = new this.barcodeInventoryModel({
-      ...dto,
-      barcode: finalBarcode,
-      tagWeight,
-      netWeight,
-      imageUrl,
-      companyName: cleanedCompanyName,
-      status: 'AVAILABLE',
-      inventoryRef: savedInventory._id,
-    });
-
-    const saved = await newItem.save();
-
-    await this.movementsService.logMovement({
-      inventoryItem: savedInventory._id.toString(),
-      type: 'INVENTORY_IN',
-      countChange: 1,
-      grossWeightChange: saved.grossWeight,
-      netWeightChange: saved.netWeight,
-      actionBy: userId,
-      reason: `إدخال قطعة باركود جديدة [${saved.barcode}] - ${saved.title}`,
-    });
-
-    return saved;
   }
 
   // 2. البحث بالباركود
@@ -194,7 +235,7 @@ export class BarcodeInventoryService {
       throw new BadRequestException(`القطعة رقم (${barcode}) مباعة بالفعل!`);
     }
 
-    return item;
+    return this.formatItemWithImages(item);
   }
 
   // 3. جلب القطع المتاحة
@@ -208,12 +249,14 @@ export class BarcodeInventoryService {
       filter.category = new Types.ObjectId(categoryId);
     }
 
-    return this.barcodeInventoryModel
+    const items = await this.barcodeInventoryModel
       .find(filter)
       .populate('category', 'name')
       .populate('inventoryRef')
       .sort({ createdAt: -1 })
       .exec();
+
+    return items.map((item) => this.formatItemWithImages(item));
   }
 
   // 4. تعديل قطعة بالباركود
@@ -336,13 +379,14 @@ export class BarcodeInventoryService {
         { new: true },
       )
       .populate('category', 'name')
+      .populate('inventoryRef')
       .exec();
 
     if (!updatedItem) {
       throw new NotFoundException('فشل تعديل القطعة');
     }
 
-    return updatedItem;
+    return this.formatItemWithImages(updatedItem);
   }
 
   // 5. الحذف الناعم
@@ -401,11 +445,14 @@ export class BarcodeInventoryService {
 
   // 6. جلب القطع المؤرشفة
   async findAllArchived(): Promise<BarcodeInventory[]> {
-    return this.barcodeInventoryModel
+    const items = await this.barcodeInventoryModel
       .find({ isArchived: true })
       .populate('category', 'name')
+      .populate('inventoryRef')
       .sort({ updatedAt: -1 })
       .exec();
+
+    return items.map((item) => this.formatItemWithImages(item));
   }
 
   // 7. توليد صورة الباركود Base64
@@ -482,6 +529,6 @@ export class BarcodeInventoryService {
       }
     }
 
-    return item;
+    return this.formatItemWithImages(item);
   }
 }
