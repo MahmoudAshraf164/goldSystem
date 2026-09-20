@@ -1,7 +1,24 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import { IsEnum, IsNumber, IsOptional, IsString, IsNotEmpty, Min } from 'class-validator';
 
 export class CreateScrapPurchaseDto {
+  @ApiProperty({
+    example: 'محمود أحمد',
+    description: 'اسم الزبون المشتري منه',
+  })
+  @IsString()
+  @IsNotEmpty({ message: 'اسم الزبون مطلوب' })
+  customerName: string;
+
+  @ApiProperty({
+    example: '01012345678',
+    description: 'رقم هاتف الزبون (اختياري)',
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  customerPhone?: string;
+
   @ApiProperty({
     example: 21,
     enum: [18, 21],

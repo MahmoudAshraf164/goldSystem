@@ -6,6 +6,12 @@ export class ScrapPurchase extends Document {
   @Prop({ type: String, required: true, unique: true })
   purchaseNumber: string; // رقم عملية الشراء الموحد مثل: SCRAP-1001
 
+  @Prop({ type: String, required: true })
+  customerName: string; // اسم الزبون
+
+  @Prop({ type: String, default: null })
+  customerPhone: string; // رقم هاتف الزبون (اختياري)
+
   @Prop({ type: Number, required: true, enum: [18, 21] })
   karat: number; // عيار 18 أو 21
 

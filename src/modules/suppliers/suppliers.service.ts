@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   NotFoundException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -99,45 +100,53 @@ export class SuppliersService {
     dto: RecordSupplierTransactionDto,
     userId: string,
   ): Promise<SupplierTransaction> {
+    // 1. التحقق من المعرفات
     if (!Types.ObjectId.isValid(dto.supplierId)) {
       throw new BadRequestException('معرف المورد غير صالح');
+    }
+
+    if (!Types.ObjectId.isValid(userId)) {
+      throw new UnauthorizedException('معرف المستخدم غير صالح');
     }
 
     const supplier = await this.supplierModel.findById(dto.supplierId);
     if (!supplier) throw new NotFoundException('المورد غير موجود');
 
-    let totalGoodsValue = 0;
+    let totalManufacturingFeeCalculated = 0;
     const totalGoodsWeightByKarat: Record<number, number> = {
       24: 0,
       21: 0,
       18: 0,
     };
 
+    // 2. حساب أوزان الذهب المستلمة + مصنعية الشغل الجديدة (حساب الأجر)
     if (dto.receivedItems && dto.receivedItems.length > 0) {
       for (const item of dto.receivedItems) {
-        totalGoodsValue += item.totalPrice;
         if (totalGoodsWeightByKarat[item.karat] !== undefined) {
           totalGoodsWeightByKarat[item.karat] += item.weight;
         }
+        // المصنعية = وزن القطعة × أجر الجرام
+        totalManufacturingFeeCalculated +=
+          (item.manufacturingFeePerGram || 0) * item.weight;
       }
     }
 
-    let totalPaymentsValue = 0;
-    let cashOutflow = 0;
+    // 3. معالجة عمليات السداد (مصنعية كاش + ذهب كسر + كاش مقابل ذهب)
+    let manufacturingFeePaid = 0;
+    let cashPaidForGold = 0;
+    let goldPriceForCash = 0;
 
     if (dto.paymentDetails) {
-      const cash = dto.paymentDetails.cashPaid || 0;
-      const fee = dto.paymentDetails.manufacturingFeePaid || 0;
-      cashOutflow = cash + fee;
-      totalPaymentsValue += cashOutflow;
+      manufacturingFeePaid = dto.paymentDetails.manufacturingFeePaid || 0;
+      cashPaidForGold = dto.paymentDetails.cashPaidForGold || 0;
+      goldPriceForCash = dto.paymentDetails.goldPriceForCashDeduction || 0;
 
+      // أ) خصم الذهب الكسر المسدد للمورد من مخزن الكسر
       if (
         dto.paymentDetails.scrapPaid &&
         dto.paymentDetails.scrapPaid.length > 0
       ) {
         for (const scrap of dto.paymentDetails.scrapPaid) {
-          totalPaymentsValue += scrap.totalValue;
-
           await this.scrapGoldService.deductScrap(
             scrap.karat,
             scrap.weight,
@@ -146,34 +155,43 @@ export class SuppliersService {
           );
         }
       }
+
+      // ب) خصم النقدية من الخزنة (مصنعية كاش + كاش مقابل ذهب)
+      const totalCashOutflow = manufacturingFeePaid + cashPaidForGold;
+      if (totalCashOutflow > 0) {
+        await this.safeService.deductCash(
+          totalCashOutflow,
+          `سداد مصنعية/كاش للمورد: ${supplier.name}`,
+          userId,
+        );
+      }
     }
 
-    if (cashOutflow > 0) {
-      await this.safeService.deductCash(
-        cashOutflow,
-        `سداد نقدية/مصنعية للمورد: ${supplier.name}`,
-        userId,
-      );
-    }
-
+    // 4. حفظ الحركة في قاعدة البيانات
     const transaction = new this.transactionModel({
       supplierId: new Types.ObjectId(dto.supplierId),
       type: dto.type,
       receivedItems: dto.receivedItems || [],
       paymentDetails: dto.paymentDetails || {
-        cashPaid: 0,
-        scrapPaid: [],
         manufacturingFeePaid: 0,
+        cashPaidForGold: 0,
+        goldPriceForCashDeduction: 0,
+        scrapPaid: [],
       },
-      actionBy: Types.ObjectId.isValid(userId)
-        ? new Types.ObjectId(userId)
-        : userId,
+      actionBy: new Types.ObjectId(userId),
       notes: dto.notes,
     });
     await transaction.save();
 
-    supplier.cashBalance += totalGoodsValue - totalPaymentsValue;
+    // 5. 🎯 تحديث دفاتر المورد (فصل تام بين دفتر النقدية ودفتر الجرامات)
 
+    // أ) **دفتر النقدية (المصنعية):**
+    // يزيد بالمصنعية المستحقة عن الشغل الجديد، وينقص بما تم سداده نقداً للمصنعية
+    supplier.cashBalance +=
+      totalManufacturingFeeCalculated - manufacturingFeePaid;
+
+    // ب) **دفتر الذهب (الجرامات لكل عيار):**
+    // 1. زيادة رصيد الذهب بالوزن المستلم جديد
     for (const karatKey of [18, 21, 24]) {
       const weightReceived = totalGoodsWeightByKarat[karatKey] || 0;
       const propKey = `karat${karatKey}` as keyof typeof supplier.goldBalances;
@@ -181,6 +199,7 @@ export class SuppliersService {
         (supplier.goldBalances[propKey] || 0) + weightReceived;
     }
 
+    // 2. خصم الذهب الكسر المسدد للمورد من رصيده
     if (dto.paymentDetails?.scrapPaid) {
       for (const scrap of dto.paymentDetails.scrapPaid) {
         const propKey =
@@ -189,6 +208,12 @@ export class SuppliersService {
           supplier.goldBalances[propKey] -= scrap.weight;
         }
       }
+    }
+
+    // 3. في حالة السداد "كاش مقابل ذهب" (نادرة): نحول المبلغ لكُتل جرامات ونخصمها من عيار 21 تلقائياً
+    if (cashPaidForGold > 0 && goldPriceForCash > 0) {
+      const equivalentGoldWeight = cashPaidForGold / goldPriceForCash;
+      supplier.goldBalances.karat21 -= equivalentGoldWeight;
     }
 
     await supplier.save();

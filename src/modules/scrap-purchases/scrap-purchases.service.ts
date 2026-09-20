@@ -69,11 +69,11 @@ export class ScrapPurchasesService {
           userId,
         );
 
-        // ب) خصم المبلغ المالي فوراً من الخزنة
+        // ب) خصم المبلغ المالي فوراً من الخزنة متضمناً اسم الزبون في بيان الحركة
         await this.safeService.triggerTransaction(
           dto.totalPrice,
           'OUTFLOW',
-          `شراء ذهب كسر رقم ${purchaseNumber} (وزن ${dto.weight}ج عيار ${dto.karat})`,
+          `شراء ذهب كسر رقم ${purchaseNumber} من الزبون: ${dto.customerName} (وزن ${dto.weight}ج عيار ${dto.karat})`,
           userId,
         );
 
@@ -94,7 +94,9 @@ export class ScrapPurchasesService {
       }
     }
 
-    throw new ConflictException('فشل في إنشاء رقم فاتورة فريد، يرجى المحاولة مرة أخرى.');
+    throw new ConflictException(
+      'فشل في إنشاء رقم فاتورة فريد، يرجى المحاولة مرة أخرى.',
+    );
   }
 
   // 2. جلب جميع عمليات شراء الكسر
@@ -138,13 +140,14 @@ export class ScrapPurchasesService {
     const newKarat = dto.karat ?? oldKarat;
     const newWeight = dto.weight ?? oldWeight;
     const newPrice = dto.totalPrice ?? oldPrice;
+    const customerName = dto.customerName ?? existing.customerName;
 
     const priceDiff = newPrice - oldPrice;
     if (priceDiff > 0) {
       await this.safeService.triggerTransaction(
         priceDiff,
         'OUTFLOW',
-        `تعديل فاتورة كسر ${existing.purchaseNumber} (زيادة السعر) - خصم ${priceDiff}ج.م`,
+        `تعديل فاتورة كسر ${existing.purchaseNumber} للزبون ${customerName} (زيادة السعر) - خصم ${priceDiff}ج.م`,
         userId,
       );
     } else if (priceDiff < 0) {
@@ -152,7 +155,7 @@ export class ScrapPurchasesService {
       await this.safeService.triggerTransaction(
         refund,
         'INFLOW',
-        `تعديل فاتورة كسر ${existing.purchaseNumber} (تخفيض السعر) - إرجاع ${refund}ج.م`,
+        `تعديل فاتورة كسر ${existing.purchaseNumber} للزبون ${customerName} (تخفيض السعر) - إرجاع ${refund}ج.م`,
         userId,
       );
     }
@@ -193,7 +196,7 @@ export class ScrapPurchasesService {
     await this.safeService.triggerTransaction(
       purchase.totalPrice,
       'INFLOW',
-      `إلغاء فاتورة شراء كسر رقم ${purchase.purchaseNumber} - إرجاع مبلغ ${purchase.totalPrice} ج.م الخزنة`,
+      `إلغاء فاتورة شراء كسر رقم ${purchase.purchaseNumber} (الزبون: ${purchase.customerName}) - إرجاع مبلغ ${purchase.totalPrice} ج.م الخزنة`,
       userId,
     );
 

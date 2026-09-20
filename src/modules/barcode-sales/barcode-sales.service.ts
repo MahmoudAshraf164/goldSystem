@@ -108,22 +108,56 @@ export class BarcodeSalesService {
   }
 
   /**
-   * دالة مساعدة لاستخراج صور القطعة من كائن الباركود (imageUrl) أو المظلة الأم
+   * دالة مساعدة لمعالجة وجلب معرف العميل بآمان بجميع الحالات (ID، اسم، أو رقم هاتف)
    */
-  private extractItemImages(item: any): string[] {
-    const rawItem = item?.toObject ? item.toObject() : item || {};
-    const parentInv = rawItem.inventoryRef || {};
+  private async resolveCustomerId(dto: {
+    customerId?: string;
+    customerName?: string;
+    phoneNumber?: string;
+  }): Promise<Types.ObjectId | undefined> {
+    if (dto.customerId && Types.ObjectId.isValid(dto.customerId)) {
+      const customer = await this.customersService.findById(dto.customerId);
+      if (customer) {
+        return (customer as any)._id as Types.ObjectId;
+      }
+    }
 
-    const singleImage =
-      rawItem.imageUrl ||
-      rawItem.image ||
-      (Array.isArray(rawItem.images) && rawItem.images[0]) ||
-      parentInv.imageUrl ||
-      parentInv.image ||
-      (Array.isArray(parentInv.images) && parentInv.images[0]) ||
-      null;
+    if (dto.customerName && dto.customerName.trim() !== '') {
+      const cleanName = dto.customerName.trim();
+      const cleanPhone = dto.phoneNumber?.trim();
 
-    return singleImage ? [singleImage] : [];
+      // 1. البحث أولاً برقم الهاتف إن وجد
+      if (cleanPhone) {
+        const existingByPhone: any = await this.customersService.findByPhone(cleanPhone);
+        if (existingByPhone?._id) {
+          return existingByPhone._id as Types.ObjectId;
+        }
+      }
+
+      // 2. إذا لم نجده برقم الهاتف، نبحث باسم العميل في قاعدة البيانات
+      const existingByName: any = await (this.customersService as any).customerModel?.findOne({
+        fullName: cleanName,
+        status: 'ACTIVE',
+      });
+      if (existingByName?._id) {
+        return existingByName._id as Types.ObjectId;
+      }
+
+      // 3. إن لم يكن العميل موجوداً نهائياً، ننشئ عميلاً جديداً
+      try {
+        const newCustomer: any = await this.customersService.create({
+          fullName: cleanName,
+          phoneNumber: cleanPhone,
+        } as any);
+        if (newCustomer?._id) {
+          return newCustomer._id as Types.ObjectId;
+        }
+      } catch (e) {
+        // حماية عند فشل الإنشاء التلقائي
+      }
+    }
+
+    return undefined;
   }
 
   // 1. إتمام عملية البيع بالباركود وإصدار الفاتورة
@@ -135,32 +169,8 @@ export class BarcodeSalesService {
     session.startTransaction();
 
     try {
-      let finalCustomerId: Types.ObjectId | undefined = undefined;
-
-      if (dto.customerId) {
-        const customer = await this.customersService.findById(dto.customerId);
-        finalCustomerId = (customer as any)?._id as Types.ObjectId;
-      } else if (dto.customerName && dto.customerName.trim() !== '') {
-        try {
-          const newCustomer: any = await this.customersService.create({
-            fullName: dto.customerName.trim(),
-            phoneNumber: dto.phoneNumber?.trim(),
-          } as any);
-          if (newCustomer && newCustomer._id) {
-            finalCustomerId = newCustomer._id as Types.ObjectId;
-          }
-        } catch (e) {
-          // في حال كان العميل موجوداً مسبقاً برقم الهاتف
-          if (dto.phoneNumber) {
-            const existingCust: any = await this.customersService.findByPhone(
-              dto.phoneNumber.trim(),
-            );
-            if (existingCust && existingCust._id) {
-              finalCustomerId = existingCust._id as Types.ObjectId;
-            }
-          }
-        }
-      }
+      // 🎯 معالجة وربط العميل بآمان
+      const finalCustomerId = await this.resolveCustomerId(dto);
 
       const processedItems: Array<{
         item: Types.ObjectId;
@@ -399,13 +409,8 @@ export class BarcodeSalesService {
       throw new BadRequestException('لا يمكن تعديل فاتورة ملغاة');
     }
 
-    if (dto.customerId) {
-      try {
-        await this.customersService.findById(dto.customerId);
-      } catch (error) {
-        throw new NotFoundException('العميل المحدد غير موجود بالنظام');
-      }
-    }
+    // 🎯 التأكد من العميل المربوط أو البحث عنه وتحديثه
+    const updatedCustomerId = await this.resolveCustomerId(dto);
 
     const session = await this.connection.startSession();
     session.startTransaction();
@@ -599,9 +604,7 @@ export class BarcodeSalesService {
       existingInvoice.totalNetWeight = grandTotalNetWeight;
       existingInvoice.finalPaidAmount = grandTotalAmount;
       existingInvoice.totalAmount = grandTotalAmount;
-      existingInvoice.customer = dto.customerId
-        ? new Types.ObjectId(dto.customerId)
-        : undefined;
+      existingInvoice.customer = updatedCustomerId ?? existingInvoice.customer;
 
       await existingInvoice.save({ session });
 
@@ -614,6 +617,25 @@ export class BarcodeSalesService {
       session.endSession();
       throw error;
     }
+  }
+
+  /**
+   * دالة مساعدة لاستخراج صور القطعة من كائن الباركود (imageUrl) أو المظلة الأم
+   */
+  private extractItemImages(item: any): string[] {
+    const rawItem = item?.toObject ? item.toObject() : item || {};
+    const parentInv = rawItem.inventoryRef || {};
+
+    const singleImage =
+      rawItem.imageUrl ||
+      rawItem.image ||
+      (Array.isArray(rawItem.images) && rawItem.images[0]) ||
+      parentInv.imageUrl ||
+      parentInv.image ||
+      (Array.isArray(parentInv.images) && parentInv.images[0]) ||
+      null;
+
+    return singleImage ? [singleImage] : [];
   }
 
   // 5. إلغاء الفاتورة
