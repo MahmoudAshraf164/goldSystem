@@ -28,6 +28,7 @@ import { BarcodeInventoryModule } from './modules/barcode-inventory/barcode-inve
 import { MeltingModule } from './modules/melting/melting.module';
 import { ScrapPurchasesModule } from './modules/scrap-purchases/scrap-purchases.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
+import { SilverModule } from './modules/silver/silver.module';
 
 @Module({
   imports: [
@@ -84,6 +85,7 @@ import { SuppliersModule } from './modules/suppliers/suppliers.module';
     ScrapPurchasesModule,
     MeltingModule,
     SuppliersModule,
+    SilverModule,
   ],
   controllers: [AppController],
 })
