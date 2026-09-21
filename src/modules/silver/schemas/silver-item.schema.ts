@@ -1,5 +1,5 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
 
 export type SilverItemDocument = SilverItem & Document;
 
@@ -11,31 +11,23 @@ export enum SilverKarat {
   K1000 = 1000,
 }
 
-export enum SilverCategory {
-  RING = 'خاتم',
-  WEDDING_BAND = 'دبلة',
-  BRACELET = 'أنسيل',
-  CHAIN = 'سلسلة',
-  EARRING = 'حلق',
-  OTHER = 'أخرى',
-}
-
 @Schema({ timestamps: true })
 export class SilverItem {
   @Prop({ required: true })
-  title: string; // مثل: سلسلة إيطالي عيار 925
+  title: string;
 
   @Prop({ required: true, enum: [600, 800, 900, 925, 1000] })
   karat: number;
 
-  @Prop({ required: true, enum: Object.values(SilverCategory) })
-  category: string;
+  // ربط ديناميكي مع موديول Category
+  @Prop({ type: Types.ObjectId, ref: 'Category', required: true })
+  category: Types.ObjectId;
 
   @Prop({ required: true, min: 0 })
-  weight: number; // الوزن بالجرام
+  weight: number;
 
   @Prop({ default: 1 })
-  quantity: number; // الكمية (للقطع المكررة أو 1 للقطع الفريدة)
+  quantity: number;
 
   @Prop({ default: 'AVAILABLE', enum: ['AVAILABLE', 'SOLD', 'ARCHIVED'] })
   status: string;

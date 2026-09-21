@@ -12,16 +12,23 @@ export class SilverSale {
   karat: number;
 
   @Prop({ required: true })
-  weight: number; // الوزن المباع
+  weight: number;
 
   @Prop({ required: true })
-  pricePerGram: number; // سعر جرام الفضة عند البيع
+  pricePerGram: number;
 
   @Prop({ required: true })
-  totalPrice: number; // إجمالي مبلغ البيع النقدي
+  totalPrice: number;
+
+  // بيانات العميل المضافة
+  @Prop()
+  customerName?: string;
+
+  @Prop()
+  customerPhone?: string;
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-  soldBy: Types.ObjectId; // البائع
+  soldBy: Types.ObjectId;
 
   @Prop()
   notes?: string;

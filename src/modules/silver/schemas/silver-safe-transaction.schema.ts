@@ -8,6 +8,8 @@ export enum SilverTransactionType {
   SCRAP_PURCHASE_EXPENSE = 'شراء_كسر_فضة',
   MANUAL_DEPOSIT = 'إيداع_يدوي',
   MANUAL_WITHDRAWAL = 'سحب_يدوي',
+  RESET = 'تصفير_الخزنة',
+  ADJUSTMENT = 'تعديل_رصيد',
 }
 
 @Schema({ timestamps: true })
@@ -16,10 +18,10 @@ export class SilverSafeTransaction {
   type: string;
 
   @Prop({ required: true })
-  amount: number; // المبلغ المالي (+ للإيداع/البيع، - للشراء/السحب)
+  amount: number;
 
   @Prop({ default: 0 })
-  weightChange: number; // تغير وزن الفضة الكلي بالجرام (اختياري لمتابعة وزن الفضة بالخزنة)
+  weightChange: number;
 
   @Prop({ enum: [600, 800, 900, 925, 1000] })
   karat?: number;

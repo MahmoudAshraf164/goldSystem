@@ -12,6 +12,7 @@ import {
   SilverSafeTransaction,
   SilverSafeTransactionSchema,
 } from './schemas/silver-safe-transaction.schema';
+import { CategoriesModule } from '../categories/categories.module';
 
 @Module({
   imports: [
@@ -21,9 +22,10 @@ import {
       { name: SilverScrapPurchase.name, schema: SilverScrapPurchaseSchema },
       { name: SilverSafeTransaction.name, schema: SilverSafeTransactionSchema },
     ]),
+    CategoriesModule, // استيراد موديول التصنيفات لاستغلال العلاقة الديناميكية
   ],
   controllers: [SilverController],
   providers: [SilverService],
   exports: [SilverService],
 })
-export class SilverModule {} 
+export class SilverModule {}

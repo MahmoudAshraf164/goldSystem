@@ -7,10 +7,9 @@ import {
   IsNotEmpty,
   Min,
   IsDateString,
+  IsMongoId,
 } from 'class-validator';
-import { SilverKarat, SilverCategory } from '../schemas/silver-item.schema';
 
-// DTO إضافة قطعة فضة جديدة للمخزون
 export class CreateSilverItemDto {
   @ApiProperty({ description: 'عنوان أو اسم القطعة', example: 'سلسلة إيطالي عيار 925' })
   @IsString()
@@ -21,8 +20,9 @@ export class CreateSilverItemDto {
   @IsEnum([600, 800, 900, 925, 1000])
   karat: number;
 
-  @ApiProperty({ description: 'تصنيف القطعة', enum: SilverCategory, example: SilverCategory.CHAIN })
-  @IsEnum(SilverCategory)
+  @ApiProperty({ description: 'معرف التصنيف الديناميكي (Category ObjectId)', example: '64f1ab23cd9e123456789abc' })
+  @IsMongoId()
+  @IsNotEmpty()
   category: string;
 
   @ApiProperty({ description: 'وزن القطعة بالجرام', example: 12.5 })
@@ -36,10 +36,9 @@ export class CreateSilverItemDto {
   notes?: string;
 }
 
-// DTO البيع السريع (بدون فاتورة)
 export class QuickSilverSaleDto {
-  @ApiProperty({ description: 'معرف قطعة الفضة المراد بيعها (MongoDB ObjectId)' })
-  @IsString()
+  @ApiProperty({ description: 'معرف قطعة الفضة (MongoDB ObjectId)' })
+  @IsMongoId()
   @IsNotEmpty()
   itemId: string;
 
@@ -48,13 +47,22 @@ export class QuickSilverSaleDto {
   @Min(0.1)
   pricePerGram: number;
 
-  @ApiPropertyOptional({ description: 'ملاحظات البيع' })
+  @ApiPropertyOptional({ description: 'اسم العميل', example: 'محمد علي' })
+  @IsOptional()
+  @IsString()
+  customerName?: string;
+
+  @ApiPropertyOptional({ description: 'رقم هاتف العميل', example: '01012345678' })
+  @IsOptional()
+  @IsString()
+  customerPhone?: string;
+
+  @ApiPropertyOptional({ description: 'ملاحظات عملية البيع' })
   @IsOptional()
   @IsString()
   notes?: string;
 }
 
-// DTO شراء كسر الفضة من زبون
 export class BuySilverScrapDto {
   @ApiProperty({ description: 'عيار الكسر', enum: [600, 800, 900, 925, 1000], example: 800 })
   @IsEnum([600, 800, 900, 925, 1000])
@@ -70,12 +78,12 @@ export class BuySilverScrapDto {
   @Min(0.1)
   pricePerGram: number;
 
-  @ApiPropertyOptional({ description: 'اسم العميل (اختياري)', example: 'أحمد محمود' })
+  @ApiPropertyOptional({ description: 'اسم العميل', example: 'أحمد محمود' })
   @IsOptional()
   @IsString()
   customerName?: string;
 
-  @ApiPropertyOptional({ description: 'رقم هاتف العميل (اختياري)', example: '01000000000' })
+  @ApiPropertyOptional({ description: 'رقم هاتف العميل', example: '01000000000' })
   @IsOptional()
   @IsString()
   customerPhone?: string;
@@ -86,7 +94,22 @@ export class BuySilverScrapDto {
   notes?: string;
 }
 
-// DTO طلب تقرير الفترة الزمانية
+export class AdjustSilverSafeDto {
+  @ApiProperty({ description: 'المبلغ الجديد المراد تسوية الخزنة به أو القيمة المضافة/المخصومة', example: 5000 })
+  @IsNumber()
+  amount: number;
+
+  @ApiProperty({ description: 'كلمة سر الحماية الخاصة بآدمن/مالك النظام لتحقيق الأمان', example: 'AdminSafe#2026' })
+  @IsString()
+  @IsNotEmpty()
+  securityPassword: string;
+
+  @ApiPropertyOptional({ description: 'سبب التعديل أو التصفير', example: 'جرد أسبوعي وتسوية الخزنة' })
+  @IsOptional()
+  @IsString()
+  reason?: string;
+}
+
 export class SilverReportQueryDto {
   @ApiPropertyOptional({ description: 'تاريخ البداية (ISO String)', example: '2026-09-01T00:00:00.000Z' })
   @IsOptional()
