@@ -46,7 +46,9 @@ export class SilverController {
 
   @Get('items')
   @Roles(Role.OWNER, Role.Employee)
-  @ApiOperation({ summary: 'عرض قطع الفضة المتاحة بالمخزن مع الفلترة الاختيارية' })
+  @ApiOperation({
+    summary: 'عرض قطع الفضة المتاحة بالمخزن مع الفلترة الاختيارية',
+  })
   @ApiOkResponse({ description: 'قائمة قطع الفضة المتاحة' })
   async getAvailableItems(@Query() query: GetSilverItemsQueryDto) {
     return this.silverService.getAvailableItems(query.karat, query.categoryId);
@@ -59,7 +61,7 @@ export class SilverController {
   })
   @ApiCreatedResponse({ description: 'تم البيع وإضافة المبلغ للخزنة بنجاح' })
   async quickSale(@Body() dto: QuickSilverSaleDto, @Request() req: any) {
-    const userId = req.user?.userId || req.user?.sub;
+    const userId = req.user?._id || req.user?.userId || req.user?.sub;
     return this.silverService.quickSale(dto, userId);
   }
 
@@ -68,7 +70,7 @@ export class SilverController {
   @ApiOperation({ summary: 'شراء كسر فضة من زبون' })
   @ApiCreatedResponse({ description: 'تم تسجيل شراء الكسر وخصم المبلغ من الخزنة' })
   async buyScrap(@Body() dto: BuySilverScrapDto, @Request() req: any) {
-    const userId = req.user?.userId || req.user?.sub;
+    const userId = req.user?._id || req.user?.userId || req.user?.sub;
     return this.silverService.buyScrap(dto, userId);
   }
 
@@ -85,7 +87,7 @@ export class SilverController {
   @ApiOperation({ summary: 'تصفير خزنة الفضة بالكامل (تتطلب باسوورد الحماية)' })
   @ApiOkResponse({ description: 'تم تصفير الخزنة بنجاح' })
   async resetSafe(@Body() dto: AdjustSilverSafeDto, @Request() req: any) {
-    const userId = req.user?.userId || req.user?.sub;
+    const userId = req.user?._id || req.user?.userId || req.user?.sub;
     return this.silverService.resetSafe(dto, userId);
   }
 
@@ -93,8 +95,11 @@ export class SilverController {
   @Roles(Role.OWNER)
   @ApiOperation({ summary: 'تعديل رصيد خزنة الفضة لقيمة معينة (تتطلب باسوورد الحماية)' })
   @ApiOkResponse({ description: 'تم تعديل رصيد الخزنة بنجاح' })
-  async adjustSafeBalance(@Body() dto: AdjustSilverSafeDto, @Request() req: any) {
-    const userId = req.user?.userId || req.user?.sub;
+  async adjustSafeBalance(
+    @Body() dto: AdjustSilverSafeDto,
+    @Request() req: any,
+  ) {
+    const userId = req.user?._id || req.user?.userId || req.user?.sub;
     return this.silverService.adjustSafeBalance(dto, userId);
   }
 

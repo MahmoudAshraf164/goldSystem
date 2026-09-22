@@ -26,7 +26,8 @@ import {
 
 @Injectable()
 export class SilverService {
-  private readonly ADMIN_SAFE_PASSWORD = process.env.SILVER_SAFE_PASSWORD || 'AdminSafe#2026';
+  private readonly ADMIN_SAFE_PASSWORD =
+    process.env.SILVER_SAFE_PASSWORD || 'AdminSafe#2026';
 
   constructor(
     @InjectModel(SilverItem.name)
@@ -39,23 +40,37 @@ export class SilverService {
     private readonly safeModel: Model<SilverSafeTransactionDocument>,
   ) {}
 
-  // 1. إضافة قطعة للمخزون وتربيطها بالتصنيف الديناميكي
+  // 1. إضافة قطعة جديدة لمخزون الفضة
   async addSilverItem(dto: CreateSilverItemDto): Promise<SilverItem> {
-    const newItem = new this.silverItemModel(dto);
+    const newItem = new this.silverItemModel({
+      ...dto,
+      category: new Types.ObjectId(dto.category),
+    });
     return newItem.save();
   }
 
-  // 2. عرض المخزون المتاح مع إمكانية التمرير الاختياري للـ Query Params دون إحداث Crash
+  // 2. عرض القطع المتاحة (حل مشكلة 500 Server Crash في حالة عدم إرسال karat)
   async getAvailableItems(karat?: number, categoryId?: string) {
     const filter: any = { status: 'AVAILABLE' };
 
-    // التحقق الآمن من العيار
-    if (karat !== undefined && karat !== null && !isNaN(Number(karat))) {
+    // التأكد من أن العيار رقم صحيح قبل الإضافة للفلتر
+    if (
+      karat !== undefined &&
+      karat !== null &&
+      !isNaN(Number(karat)) &&
+      Number(karat) > 0
+    ) {
       filter.karat = Number(karat);
     }
 
-    // التحقق الآمن من معرف التصنيف
-    if (categoryId && typeof categoryId === 'string' && categoryId.trim() !== '') {
+    // التأكد من صحة الـ ObjectId للتصنيف قبل الفلترة
+    if (
+      categoryId &&
+      typeof categoryId === 'string' &&
+      categoryId.trim() !== '' &&
+      categoryId !== 'undefined' &&
+      categoryId !== 'null'
+    ) {
       if (Types.ObjectId.isValid(categoryId)) {
         filter.category = new Types.ObjectId(categoryId);
       } else {
@@ -70,14 +85,19 @@ export class SilverService {
       .exec();
   }
 
-  // 3. البيع السريع مع تسجيل اسم ورقم العميل
+  // 3. بيع قطعة فضة سريع وتحديث الخزنة
   async quickSale(dto: QuickSilverSaleDto, userId: string) {
+    if (!userId || !Types.ObjectId.isValid(userId)) {
+      throw new UnauthorizedException('معرف المستخدم غير صالح');
+    }
+
     const item = await this.silverItemModel.findById(dto.itemId);
     if (!item || item.status !== 'AVAILABLE') {
       throw new NotFoundException('قطعة الفضة غير متاحة للبيع');
     }
 
     const totalPrice = item.weight * dto.pricePerGram;
+    const userObjectId = new Types.ObjectId(userId);
 
     item.status = 'SOLD';
     await item.save();
@@ -90,7 +110,7 @@ export class SilverService {
       totalPrice,
       customerName: dto.customerName,
       customerPhone: dto.customerPhone,
-      soldBy: userId,
+      soldBy: userObjectId,
       notes: dto.notes,
     });
 
@@ -99,21 +119,28 @@ export class SilverService {
       amount: totalPrice,
       weightChange: -item.weight,
       karat: item.karat,
-      createdBy: userId,
-      notes: `بيع فضة - قطعة: ${item.title}${dto.customerName ? ` - العميل: ${dto.customerName}` : ''}`,
+      createdBy: userObjectId,
+      notes: `بيع فضة - قطعة: ${item.title}${
+        dto.customerName ? ` - العميل: ${dto.customerName}` : ''
+      }`,
     });
 
     return sale;
   }
 
-  // 4. شراء كسر فضة من زبون
+  // 4. شراء كسر فضة مع تسجيل purchasedBy بشكل صحيح
   async buyScrap(dto: BuySilverScrapDto, userId: string) {
+    if (!userId || !Types.ObjectId.isValid(userId)) {
+      throw new UnauthorizedException('معرف المستخدم غير صالح');
+    }
+
     const totalPaid = dto.weight * dto.pricePerGram;
+    const userObjectId = new Types.ObjectId(userId);
 
     const scrap = await this.scrapModel.create({
       ...dto,
       totalPaid,
-      purchasedBy: userId,
+      purchasedBy: userObjectId,
     });
 
     await this.safeModel.create({
@@ -121,14 +148,16 @@ export class SilverService {
       amount: -totalPaid,
       weightChange: dto.weight,
       karat: dto.karat,
-      createdBy: userId,
-      notes: `شراء كسر فضة عيار ${dto.karat}${dto.customerName ? ` - العميل: ${dto.customerName}` : ''}`,
+      createdBy: userObjectId,
+      notes: `شراء كسر فضة عيار ${dto.karat}${
+        dto.customerName ? ` - العميل: ${dto.customerName}` : ''
+      }`,
     });
 
     return scrap;
   }
 
-  // 5. استعلام رصيد خزنة الفضة الحالي
+  // 5. استعلام رصيد خزنة الفضة
   async getSilverSafeBalance() {
     const balanceResult = await this.safeModel.aggregate([
       { $group: { _id: null, totalCash: { $sum: '$amount' } } },
@@ -138,10 +167,16 @@ export class SilverService {
     };
   }
 
-  // 6. تصفير خزنة الفضة باستخدام باسوورد
+  // 6. تصفير الخزنة
   async resetSafe(dto: AdjustSilverSafeDto, userId: string) {
+    if (!userId || !Types.ObjectId.isValid(userId)) {
+      throw new UnauthorizedException('معرف المستخدم غير صالح');
+    }
+
     if (dto.securityPassword !== this.ADMIN_SAFE_PASSWORD) {
-      throw new UnauthorizedException('كلمة سر الحماية غير صحيحة، لا يمكن تصفير الخزنة');
+      throw new UnauthorizedException(
+        'كلمة سر الحماية غير صحيحة، لا يمكن تصفير الخزنة',
+      );
     }
 
     const { currentCashBalance } = await this.getSilverSafeBalance();
@@ -154,15 +189,21 @@ export class SilverService {
     return this.safeModel.create({
       type: SilverTransactionType.RESET,
       amount: adjustmentAmount,
-      createdBy: userId,
+      createdBy: new Types.ObjectId(userId),
       notes: dto.reason || 'تصفير خزنة الفضة بطلب الإدارة',
     });
   }
 
-  // 7. تعديل رصيد الخزنة يدوياً باستعمال باسوورد الحماية
+  // 7. تعديل رصيد الخزنة
   async adjustSafeBalance(dto: AdjustSilverSafeDto, userId: string) {
+    if (!userId || !Types.ObjectId.isValid(userId)) {
+      throw new UnauthorizedException('معرف المستخدم غير صالح');
+    }
+
     if (dto.securityPassword !== this.ADMIN_SAFE_PASSWORD) {
-      throw new UnauthorizedException('كلمة سر الحماية غير صحيحة، لا يمكن تعديل رصيد الخزنة');
+      throw new UnauthorizedException(
+        'كلمة سر الحماية غير صحيحة، لا يمكن تعديل رصيد الخزنة',
+      );
     }
 
     const { currentCashBalance } = await this.getSilverSafeBalance();
@@ -171,25 +212,38 @@ export class SilverService {
     return this.safeModel.create({
       type: SilverTransactionType.ADJUSTMENT,
       amount: difference,
-      createdBy: userId,
-      notes: dto.reason || `تعديل رصيد الخزنة من ${currentCashBalance} إلى ${dto.amount}`,
+      createdBy: new Types.ObjectId(userId),
+      notes:
+        dto.reason ||
+        `تعديل رصيد الخزنة من ${currentCashBalance} إلى ${dto.amount}`,
     });
   }
 
-  // 8. تقرير مالي ووزني للفترة الزمانية
+  // 8. التقارير
   async getSilverReport(startDate: Date, endDate: Date) {
     const filter = { createdAt: { $gte: startDate,$lte: endDate } };
 
-    const sales = await this.silverSaleModel.find(filter).populate('silverItem', 'title');
+    const sales = await this.silverSaleModel
+      .find(filter)
+      .populate('silverItem', 'title');
     const scrapPurchases = await this.scrapModel.find(filter);
     const safeTransactions = await this.safeModel.find(filter);
 
-    const totalSalesIncome = sales.reduce((acc, curr) => acc + curr.totalPrice, 0);
-    const totalScrapExpenses = scrapPurchases.reduce((acc, curr) => acc + curr.totalPaid, 0);
+    const totalSalesIncome = sales.reduce(
+      (acc, curr) => acc + curr.totalPrice,
+      0,
+    );
+    const totalScrapExpenses = scrapPurchases.reduce(
+      (acc, curr) => acc + curr.totalPaid,
+      0,
+    );
     const netCashFlow = totalSalesIncome - totalScrapExpenses;
 
     const totalSoldWeight = sales.reduce((acc, curr) => acc + curr.weight, 0);
-    const totalScrapBoughtWeight = scrapPurchases.reduce((acc, curr) => acc + curr.weight, 0);
+    const totalScrapBoughtWeight = scrapPurchases.reduce(
+      (acc, curr) => acc + curr.weight,
+      0,
+    );
 
     return {
       period: { startDate, endDate },
