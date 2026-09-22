@@ -23,6 +23,7 @@ import {
   AdjustSilverSafeDto,
   SilverReportQueryDto,
 } from './dto/silver.dto';
+import { GetSilverItemsQueryDto } from './dto/get-silver-items-query.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -45,13 +46,10 @@ export class SilverController {
 
   @Get('items')
   @Roles(Role.OWNER, Role.Employee)
-  @ApiOperation({ summary: 'عرض قطع الفضة المتاحة بالمخزن مع التصنيف الديناميكي' })
+  @ApiOperation({ summary: 'عرض قطع الفضة المتاحة بالمخزن مع الفلترة الاختيارية' })
   @ApiOkResponse({ description: 'قائمة قطع الفضة المتاحة' })
-  async getAvailableItems(
-    @Query('karat') karat?: number,
-    @Query('categoryId') categoryId?: string,
-  ) {
-    return this.silverService.getAvailableItems(karat, categoryId);
+  async getAvailableItems(@Query() query: GetSilverItemsQueryDto) {
+    return this.silverService.getAvailableItems(query.karat, query.categoryId);
   }
 
   @Post('sale/quick')

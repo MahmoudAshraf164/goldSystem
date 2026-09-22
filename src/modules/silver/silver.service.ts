@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { SilverItem, SilverItemDocument } from './schemas/silver-item.schema';
 import { SilverSale, SilverSaleDocument } from './schemas/silver-sale.schema';
 import {
@@ -26,7 +26,6 @@ import {
 
 @Injectable()
 export class SilverService {
-  // يمكنك ضبط الباسورد من ملف .env أو استبداله بالرمز المعتمد لديك
   private readonly ADMIN_SAFE_PASSWORD = process.env.SILVER_SAFE_PASSWORD || 'AdminSafe#2026';
 
   constructor(
@@ -46,11 +45,23 @@ export class SilverService {
     return newItem.save();
   }
 
-  // 2. عرض المخزون المتاح مع عمل Populate للتصنيف الديناميكي
+  // 2. عرض المخزون المتاح مع إمكانية التمرير الاختياري للـ Query Params دون إحداث Crash
   async getAvailableItems(karat?: number, categoryId?: string) {
     const filter: any = { status: 'AVAILABLE' };
-    if (karat) filter.karat = Number(karat);
-    if (categoryId) filter.category = categoryId;
+
+    // التحقق الآمن من العيار
+    if (karat !== undefined && karat !== null && !isNaN(Number(karat))) {
+      filter.karat = Number(karat);
+    }
+
+    // التحقق الآمن من معرف التصنيف
+    if (categoryId && typeof categoryId === 'string' && categoryId.trim() !== '') {
+      if (Types.ObjectId.isValid(categoryId)) {
+        filter.category = new Types.ObjectId(categoryId);
+      } else {
+        throw new BadRequestException('معرف التصنيف الممرر غير صالح');
+      }
+    }
 
     return this.silverItemModel
       .find(filter)
