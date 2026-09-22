@@ -105,7 +105,8 @@ export class SuppliersService {
       throw new BadRequestException('معرف المورد غير صالح');
     }
 
-    if (!Types.ObjectId.isValid(userId)) {
+    const stringUserId = userId?.toString();
+    if (!stringUserId || !Types.ObjectId.isValid(stringUserId)) {
       throw new UnauthorizedException('معرف المستخدم غير صالح');
     }
 
@@ -150,7 +151,7 @@ export class SuppliersService {
           await this.scrapGoldService.deductScrap(
             scrap.karat,
             scrap.weight,
-            userId,
+            stringUserId,
             `سداد ذهب كسر للمورد: ${supplier.name}`,
           );
         }
@@ -162,7 +163,7 @@ export class SuppliersService {
         await this.safeService.deductCash(
           totalCashOutflow,
           `سداد مصنعية/كاش للمورد: ${supplier.name}`,
-          userId,
+          stringUserId,
         );
       }
     }
@@ -178,20 +179,18 @@ export class SuppliersService {
         goldPriceForCashDeduction: 0,
         scrapPaid: [],
       },
-      actionBy: new Types.ObjectId(userId),
+      actionBy: new Types.ObjectId(stringUserId),
       notes: dto.notes,
     });
     await transaction.save();
 
-    // 5. 🎯 تحديث دفاتر المورد (فصل تام بين دفتر النقدية ودفتر الجرامات)
+    // 5. تحديث دفاتر المورد (فصل تام بين دفتر النقدية ودفتر الجرامات)
 
-    // أ) **دفتر النقدية (المصنعية):**
-    // يزيد بالمصنعية المستحقة عن الشغل الجديد، وينقص بما تم سداده نقداً للمصنعية
+    // أ) دفتر النقدية (المصنعية)
     supplier.cashBalance +=
       totalManufacturingFeeCalculated - manufacturingFeePaid;
 
-    // ب) **دفتر الذهب (الجرامات لكل عيار):**
-    // 1. زيادة رصيد الذهب بالوزن المستلم جديد
+    // ب) دفتر الذهب (الجرامات لكل عيار)
     for (const karatKey of [18, 21, 24]) {
       const weightReceived = totalGoodsWeightByKarat[karatKey] || 0;
       const propKey = `karat${karatKey}` as keyof typeof supplier.goldBalances;
@@ -199,7 +198,6 @@ export class SuppliersService {
         (supplier.goldBalances[propKey] || 0) + weightReceived;
     }
 
-    // 2. خصم الذهب الكسر المسدد للمورد من رصيده
     if (dto.paymentDetails?.scrapPaid) {
       for (const scrap of dto.paymentDetails.scrapPaid) {
         const propKey =
@@ -210,7 +208,6 @@ export class SuppliersService {
       }
     }
 
-    // 3. في حالة السداد "كاش مقابل ذهب" (نادرة): نحول المبلغ لكُتل جرامات ونخصمها من عيار 21 تلقائياً
     if (cashPaidForGold > 0 && goldPriceForCash > 0) {
       const equivalentGoldWeight = cashPaidForGold / goldPriceForCash;
       supplier.goldBalances.karat21 -= equivalentGoldWeight;
