@@ -3,6 +3,7 @@ import {
   NotFoundException,
   UnauthorizedException,
   BadRequestException,
+  OnModuleInit,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -23,11 +24,10 @@ import {
   BuySilverScrapDto,
   AdjustSilverSafeDto,
 } from './dto/silver.dto';
-
 import { UpdateSilverItemDto } from './dto/UpdateSilverItem.dto';
 
 @Injectable()
-export class SilverService {
+export class SilverService implements OnModuleInit {
   private readonly ADMIN_SAFE_PASSWORD =
     process.env.SILVER_SAFE_PASSWORD || 'AdminSafe#2026';
 
@@ -41,6 +41,14 @@ export class SilverService {
     @InjectModel(SilverSafeTransaction.name)
     private readonly safeModel: Model<SilverSafeTransactionDocument>,
   ) {}
+
+  // تحديث تلقائي للقطع القديمة التي لا تحتوي على حقل status عند تشغيل السيرفر
+  async onModuleInit() {
+    await this.silverItemModel.updateMany(
+      { $or: [{ status: {$exists: false } }, { status: null }] },
+      { $set: { status: 'AVAILABLE' } },
+    );
+  }
 
   // 1. إضافة قطعة جديدة لمخزون الفضة
   async addSilverItem(dto: CreateSilverItemDto): Promise<SilverItem> {

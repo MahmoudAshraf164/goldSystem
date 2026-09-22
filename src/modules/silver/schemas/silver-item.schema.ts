@@ -19,7 +19,6 @@ export class SilverItem {
   @Prop({ required: true, enum: [600, 800, 900, 925, 1000] })
   karat: number;
 
-  // ربط ديناميكي مع موديول Category
   @Prop({ type: Types.ObjectId, ref: 'Category', required: true })
   category: Types.ObjectId;
 

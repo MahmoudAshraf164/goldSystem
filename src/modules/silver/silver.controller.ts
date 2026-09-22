@@ -20,7 +20,6 @@ import {
 import { SilverService } from './silver.service';
 import {
   CreateSilverItemDto,
-  
   QuickSilverSaleDto,
   BuySilverScrapDto,
   AdjustSilverSafeDto,
@@ -84,7 +83,7 @@ export class SilverController {
   })
   @ApiCreatedResponse({ description: 'تم البيع وإضافة المبلغ للخزنة بنجاح' })
   async quickSale(@Body() dto: QuickSilverSaleDto, @Request() req: any) {
-    const userId = req.user?._id || req.user?.userId || req.user?.sub;
+    const userId = req.user?._id || req.user?.id || req.user?.userId || req.user?.sub;
     return this.silverService.quickSale(dto, userId);
   }
 
@@ -93,7 +92,7 @@ export class SilverController {
   @ApiOperation({ summary: 'شراء كسر فضة من زبون' })
   @ApiCreatedResponse({ description: 'تم تسجيل شراء الكسر وخصم المبلغ من الخزنة' })
   async buyScrap(@Body() dto: BuySilverScrapDto, @Request() req: any) {
-    const userId = req.user?._id || req.user?.userId || req.user?.sub;
+    const userId = req.user?._id || req.user?.id || req.user?.userId || req.user?.sub;
     return this.silverService.buyScrap(dto, userId);
   }
 
@@ -110,7 +109,7 @@ export class SilverController {
   @ApiOperation({ summary: 'تصفير خزنة الفضة بالكامل (تتطلب باسوورد الحماية)' })
   @ApiOkResponse({ description: 'تم تصفير الخزنة بنجاح' })
   async resetSafe(@Body() dto: AdjustSilverSafeDto, @Request() req: any) {
-    const userId = req.user?._id || req.user?.userId || req.user?.sub;
+    const userId = req.user?._id || req.user?.id || req.user?.userId || req.user?.sub;
     return this.silverService.resetSafe(dto, userId);
   }
 
@@ -122,7 +121,7 @@ export class SilverController {
     @Body() dto: AdjustSilverSafeDto,
     @Request() req: any,
   ) {
-    const userId = req.user?._id || req.user?.userId || req.user?.sub;
+    const userId = req.user?._id || req.user?.id || req.user?.userId || req.user?.sub;
     return this.silverService.adjustSafeBalance(dto, userId);
   }
 
