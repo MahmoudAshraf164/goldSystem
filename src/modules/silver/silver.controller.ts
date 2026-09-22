@@ -3,6 +3,8 @@ import {
   Post,
   Get,
   Patch,
+  Delete,
+  Param,
   Body,
   Query,
   UseGuards,
@@ -18,11 +20,13 @@ import {
 import { SilverService } from './silver.service';
 import {
   CreateSilverItemDto,
+  
   QuickSilverSaleDto,
   BuySilverScrapDto,
   AdjustSilverSafeDto,
   SilverReportQueryDto,
 } from './dto/silver.dto';
+import { UpdateSilverItemDto } from './dto/UpdateSilverItem.dto';
 import { GetSilverItemsQueryDto } from './dto/get-silver-items-query.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -52,6 +56,25 @@ export class SilverController {
   @ApiOkResponse({ description: 'قائمة قطع الفضة المتاحة' })
   async getAvailableItems(@Query() query: GetSilverItemsQueryDto) {
     return this.silverService.getAvailableItems(query.karat, query.categoryId);
+  }
+
+  @Patch('items/:id')
+  @Roles(Role.OWNER, Role.Employee)
+  @ApiOperation({ summary: 'تعديل بيانات قطعة في مخزون الفضة' })
+  @ApiOkResponse({ description: 'تم تعديل القطعة بنجاح' })
+  async updateItem(
+    @Param('id') id: string,
+    @Body() dto: UpdateSilverItemDto,
+  ) {
+    return this.silverService.updateSilverItem(id, dto);
+  }
+
+  @Delete('items/:id')
+  @Roles(Role.OWNER)
+  @ApiOperation({ summary: 'حذف قطعة من مخزون الفضة' })
+  @ApiOkResponse({ description: 'تم حذف القطعة بنجاح' })
+  async deleteItem(@Param('id') id: string) {
+    return this.silverService.deleteSilverItem(id);
   }
 
   @Post('sale/quick')

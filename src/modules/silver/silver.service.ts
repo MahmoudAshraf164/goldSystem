@@ -24,6 +24,8 @@ import {
   AdjustSilverSafeDto,
 } from './dto/silver.dto';
 
+import { UpdateSilverItemDto } from './dto/UpdateSilverItem.dto';
+
 @Injectable()
 export class SilverService {
   private readonly ADMIN_SAFE_PASSWORD =
@@ -49,11 +51,11 @@ export class SilverService {
     return newItem.save();
   }
 
-  // 2. عرض القطع المتاحة (حل مشكلة 500 Server Crash في حالة عدم إرسال karat)
+  // 2. عرض القطع المتاحة (مع هاندلة "كل التصنيفات" و "all")
   async getAvailableItems(karat?: number, categoryId?: string) {
     const filter: any = { status: 'AVAILABLE' };
 
-    // التأكد من أن العيار رقم صحيح قبل الإضافة للفلتر
+    // فلترة العيار
     if (
       karat !== undefined &&
       karat !== null &&
@@ -63,13 +65,14 @@ export class SilverService {
       filter.karat = Number(karat);
     }
 
-    // التأكد من صحة الـ ObjectId للتصنيف قبل الفلترة
+    // فلترة التصنيف (تجاهل كلمة all والنصوص الفارغة)
     if (
       categoryId &&
       typeof categoryId === 'string' &&
       categoryId.trim() !== '' &&
       categoryId !== 'undefined' &&
-      categoryId !== 'null'
+      categoryId !== 'null' &&
+      categoryId.toLowerCase() !== 'all'
     ) {
       if (Types.ObjectId.isValid(categoryId)) {
         filter.category = new Types.ObjectId(categoryId);
@@ -85,7 +88,46 @@ export class SilverService {
       .exec();
   }
 
-  // 3. بيع قطعة فضة سريع وتحديث الخزنة
+  // 3. تعديل قطعة في المخزون
+  async updateSilverItem(id: string, dto: UpdateSilverItemDto) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('معرف القطعة غير صالح');
+    }
+
+    const updateData: any = { ...dto };
+    if (dto.category) {
+      if (!Types.ObjectId.isValid(dto.category)) {
+        throw new BadRequestException('معرف التصنيف غير صالح');
+      }
+      updateData.category = new Types.ObjectId(dto.category);
+    }
+
+    const updatedItem = await this.silverItemModel
+      .findByIdAndUpdate(id, { $set: updateData }, { new: true })
+      .populate('category', 'name code');
+
+    if (!updatedItem) {
+      throw new NotFoundException('قطعة الفضة غير موجودة');
+    }
+
+    return updatedItem;
+  }
+
+  // 4. حذف قطعة من المخزون
+  async deleteSilverItem(id: string) {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('معرف القطعة غير صالح');
+    }
+
+    const deletedItem = await this.silverItemModel.findByIdAndDelete(id);
+    if (!deletedItem) {
+      throw new NotFoundException('قطعة الفضة غير موجودة أو تم حذفها سابقاً');
+    }
+
+    return { message: 'تم حذف قطعة الفضة من المخزون بنجاح', id };
+  }
+
+  // 5. بيع قطعة فضة سريع وتحديث الخزنة
   async quickSale(dto: QuickSilverSaleDto, userId: string) {
     if (!userId || !Types.ObjectId.isValid(userId)) {
       throw new UnauthorizedException('معرف المستخدم غير صالح');
@@ -128,7 +170,7 @@ export class SilverService {
     return sale;
   }
 
-  // 4. شراء كسر فضة مع تسجيل purchasedBy بشكل صحيح
+  // 6. شراء كسر فضة مع تسجيل purchasedBy بشكل صحيح
   async buyScrap(dto: BuySilverScrapDto, userId: string) {
     if (!userId || !Types.ObjectId.isValid(userId)) {
       throw new UnauthorizedException('معرف المستخدم غير صالح');
@@ -157,7 +199,7 @@ export class SilverService {
     return scrap;
   }
 
-  // 5. استعلام رصيد خزنة الفضة
+  // 7. استعلام رصيد خزنة الفضة
   async getSilverSafeBalance() {
     const balanceResult = await this.safeModel.aggregate([
       { $group: { _id: null, totalCash: { $sum: '$amount' } } },
@@ -167,7 +209,7 @@ export class SilverService {
     };
   }
 
-  // 6. تصفير الخزنة
+  // 8. تصفير الخزنة
   async resetSafe(dto: AdjustSilverSafeDto, userId: string) {
     if (!userId || !Types.ObjectId.isValid(userId)) {
       throw new UnauthorizedException('معرف المستخدم غير صالح');
@@ -194,7 +236,7 @@ export class SilverService {
     });
   }
 
-  // 7. تعديل رصيد الخزنة
+  // 9. تعديل رصيد الخزنة
   async adjustSafeBalance(dto: AdjustSilverSafeDto, userId: string) {
     if (!userId || !Types.ObjectId.isValid(userId)) {
       throw new UnauthorizedException('معرف المستخدم غير صالح');
@@ -219,7 +261,7 @@ export class SilverService {
     });
   }
 
-  // 8. التقارير
+  // 10. التقارير
   async getSilverReport(startDate: Date, endDate: Date) {
     const filter = { createdAt: { $gte: startDate,$lte: endDate } };
 
