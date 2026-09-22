@@ -1,16 +1,21 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsNumber, IsMongoId } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsOptional, IsString } from 'class-validator';
 
 export class GetSilverItemsQueryDto {
-  @ApiPropertyOptional({ description: 'عيار الفضة اختيارياً (مثل: 925)', example: 925 })
+  @ApiPropertyOptional({ description: 'عيار الفضة اختيارياً (مثل: 925)' })
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber({}, { message: 'يجب أن يكون العيار رقماً صالحاً' })
-  karat?: number;
+  @IsString()
+  karat?: string;
 
-  @ApiPropertyOptional({ description: 'معرف التصنيف اختيارياً (Category ObjectId)' })
+  @ApiPropertyOptional({
+    description: 'معرف التصنيف اختيارياً (Category ObjectId)',
+  })
   @IsOptional()
-  @IsMongoId({ message: 'معرف التصنيف الممرر غير صالح' })
+  @IsString()
   categoryId?: string;
+
+  @ApiPropertyOptional({ description: 'البحث باسم القطعة' })
+  @IsOptional()
+  @IsString()
+  search?: string;
 }

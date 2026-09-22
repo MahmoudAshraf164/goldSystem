@@ -42,7 +42,6 @@ export class SilverService implements OnModuleInit {
     private readonly safeModel: Model<SilverSafeTransactionDocument>,
   ) {}
 
-  // تحديث تلقائي للقطع القديمة التي لا تحتوي على حقل status عند تشغيل السيرفر
   async onModuleInit() {
     await this.silverItemModel.updateMany(
       { $or: [{ status: {$exists: false } }, { status: null }] },
@@ -59,21 +58,14 @@ export class SilverService implements OnModuleInit {
     return newItem.save();
   }
 
-  // 2. عرض القطع المتاحة (مع هاندلة "كل التصنيفات" و "all")
-  async getAvailableItems(karat?: number, categoryId?: string) {
+  // 2. عرض القطع المتاحة للبيع أو المخزون مع معالجة المرونة بالبحث
+  async getAvailableItems(karat?: string | number, categoryId?: string, search?: string) {
     const filter: any = { status: 'AVAILABLE' };
 
-    // فلترة العيار
-    if (
-      karat !== undefined &&
-      karat !== null &&
-      !isNaN(Number(karat)) &&
-      Number(karat) > 0
-    ) {
+    if (karat && karat !== 'all' && !isNaN(Number(karat))) {
       filter.karat = Number(karat);
     }
 
-    // فلترة التصنيف (تجاهل كلمة all والنصوص الفارغة)
     if (
       categoryId &&
       typeof categoryId === 'string' &&
@@ -84,9 +76,11 @@ export class SilverService implements OnModuleInit {
     ) {
       if (Types.ObjectId.isValid(categoryId)) {
         filter.category = new Types.ObjectId(categoryId);
-      } else {
-        throw new BadRequestException('معرف التصنيف الممرر غير صالح');
       }
+    }
+
+    if (search && search.trim() !== '') {
+      filter.title = { $regex: search.trim(),$options: 'i' };
     }
 
     return this.silverItemModel
@@ -96,7 +90,37 @@ export class SilverService implements OnModuleInit {
       .exec();
   }
 
-  // 3. تعديل قطعة في المخزون
+  // 3. ملخص المخزون (تجميع بالعيار والتصنيف مع الأوزان والأعداد)
+  async getInventorySummary() {
+    return this.silverItemModel.aggregate([
+      { $match: { status: 'AVAILABLE' } },
+      {
+        $group: {
+          _id: { category: '$category', karat: '$karat' },
+          totalWeight: { $sum: '$weight' },
+          totalCount: { $sum: {$ifNull: ['$quantity', 1] } },         },       },       {$lookup: {
+          from: 'categories',
+          localField: '_id.category',
+          foreignField: '_id',
+          as: 'categoryDetails',
+        },
+      },
+      { $unwind: { path: '$categoryDetails', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 0,
+          categoryId: '$_id.category',
+          categoryName: { $ifNull: ['$categoryDetails.name', 'غير محدد'] },
+          karat: '$_id.karat',
+          totalWeight: 1,
+          totalCount: 1,
+        },
+      },
+      { $sort: { karat: -1, categoryName: 1 } },
+    ]);
+  }
+
+  // 4. تعديل قطعة في المخزون
   async updateSilverItem(id: string, dto: UpdateSilverItemDto) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('معرف القطعة غير صالح');
@@ -121,7 +145,7 @@ export class SilverService implements OnModuleInit {
     return updatedItem;
   }
 
-  // 4. حذف قطعة من المخزون
+  // 5. حذف قطعة من المخزون
   async deleteSilverItem(id: string) {
     if (!Types.ObjectId.isValid(id)) {
       throw new BadRequestException('معرف القطعة غير صالح');
@@ -135,7 +159,7 @@ export class SilverService implements OnModuleInit {
     return { message: 'تم حذف قطعة الفضة من المخزون بنجاح', id };
   }
 
-  // 5. بيع قطعة فضة سريع وتحديث الخزنة
+  // 6. بيع قطعة فضة سريع وتحديث الخزنة
   async quickSale(dto: QuickSilverSaleDto, userId: string) {
     if (!userId || !Types.ObjectId.isValid(userId)) {
       throw new UnauthorizedException('معرف المستخدم غير صالح');
@@ -178,7 +202,17 @@ export class SilverService implements OnModuleInit {
     return sale;
   }
 
-  // 6. شراء كسر فضة مع تسجيل purchasedBy بشكل صحيح
+  // 7. دفتر فواتير بيع الفضة
+  async getSalesInvoices() {
+    return this.silverSaleModel
+      .find()
+      .populate('silverItem', 'title category')
+      .populate('soldBy', 'name username')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
+  // 8. شراء كسر فضة
   async buyScrap(dto: BuySilverScrapDto, userId: string) {
     if (!userId || !Types.ObjectId.isValid(userId)) {
       throw new UnauthorizedException('معرف المستخدم غير صالح');
@@ -207,7 +241,16 @@ export class SilverService implements OnModuleInit {
     return scrap;
   }
 
-  // 7. استعلام رصيد خزنة الفضة
+  // 9. دفتر فواتير شراء كسر الفضة
+  async getScrapInvoices() {
+    return this.scrapModel
+      .find()
+      .populate('purchasedBy', 'name username')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
+  // 10. استعلام رصيد خزنة الفضة
   async getSilverSafeBalance() {
     const balanceResult = await this.safeModel.aggregate([
       { $group: { _id: null, totalCash: { $sum: '$amount' } } },
@@ -217,7 +260,7 @@ export class SilverService implements OnModuleInit {
     };
   }
 
-  // 8. تصفير الخزنة
+  // 11. تصفير الخزنة
   async resetSafe(dto: AdjustSilverSafeDto, userId: string) {
     if (!userId || !Types.ObjectId.isValid(userId)) {
       throw new UnauthorizedException('معرف المستخدم غير صالح');
@@ -244,7 +287,7 @@ export class SilverService implements OnModuleInit {
     });
   }
 
-  // 9. تعديل رصيد الخزنة
+  // 12. تعديل رصيد الخزنة
   async adjustSafeBalance(dto: AdjustSilverSafeDto, userId: string) {
     if (!userId || !Types.ObjectId.isValid(userId)) {
       throw new UnauthorizedException('معرف المستخدم غير صالح');
@@ -269,7 +312,7 @@ export class SilverService implements OnModuleInit {
     });
   }
 
-  // 10. التقارير
+  // 13. تقارير الفضة
   async getSilverReport(startDate: Date, endDate: Date) {
     const filter = { createdAt: { $gte: startDate,$lte: endDate } };
 
@@ -314,3 +357,6 @@ export class SilverService implements OnModuleInit {
     };
   }
 }
+
+
+

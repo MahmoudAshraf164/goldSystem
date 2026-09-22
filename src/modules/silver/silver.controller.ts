@@ -49,12 +49,22 @@ export class SilverController {
 
   @Get('items')
   @Roles(Role.OWNER, Role.Employee)
-  @ApiOperation({
-    summary: 'عرض قطع الفضة المتاحة بالمخزن مع الفلترة الاختيارية',
-  })
+  @ApiOperation({ summary: 'عرض قطع الفضة المتاحة بالمخزن مع الفلترة والبحث' })
   @ApiOkResponse({ description: 'قائمة قطع الفضة المتاحة' })
   async getAvailableItems(@Query() query: GetSilverItemsQueryDto) {
-    return this.silverService.getAvailableItems(query.karat, query.categoryId);
+    return this.silverService.getAvailableItems(
+      query.karat,
+      query.categoryId,
+      query.search,
+    );
+  }
+
+  @Get('inventory/summary')
+  @Roles(Role.OWNER, Role.Employee)
+  @ApiOperation({ summary: 'ملخص مخزون الفضة مقسم حسب التصنيف والعيار (إجمالي الوزن والعدد)' })
+  @ApiOkResponse({ description: 'ملخص أوزان وأعداد الفضة بالتصنيف والعيار' })
+  async getInventorySummary() {
+    return this.silverService.getInventorySummary();
   }
 
   @Patch('items/:id')
@@ -78,13 +88,19 @@ export class SilverController {
 
   @Post('sale/quick')
   @Roles(Role.OWNER, Role.Employee)
-  @ApiOperation({
-    summary: 'بيع قطعة فضة سريع مع إضافة بيانات العميل والتحديث الآلي للخزنة',
-  })
+  @ApiOperation({ summary: 'بيع قطعة فضة سريع مع إضافة بيانات العميل' })
   @ApiCreatedResponse({ description: 'تم البيع وإضافة المبلغ للخزنة بنجاح' })
   async quickSale(@Body() dto: QuickSilverSaleDto, @Request() req: any) {
     const userId = req.user?._id || req.user?.id || req.user?.userId || req.user?.sub;
     return this.silverService.quickSale(dto, userId);
+  }
+
+  @Get('sales/invoices')
+  @Roles(Role.OWNER, Role.Employee)
+  @ApiOperation({ summary: 'دفتر فواتير بيع الفضة' })
+  @ApiOkResponse({ description: 'قائمة فواتير بيع الفضة' })
+  async getSalesInvoices() {
+    return this.silverService.getSalesInvoices();
   }
 
   @Post('scrap/buy')
@@ -94,6 +110,14 @@ export class SilverController {
   async buyScrap(@Body() dto: BuySilverScrapDto, @Request() req: any) {
     const userId = req.user?._id || req.user?.id || req.user?.userId || req.user?.sub;
     return this.silverService.buyScrap(dto, userId);
+  }
+
+  @Get('scrap/invoices')
+  @Roles(Role.OWNER, Role.Employee)
+  @ApiOperation({ summary: 'دفتر فواتير شراء كسر الفضة' })
+  @ApiOkResponse({ description: 'قائمة فواتير شراء الكسر' })
+  async getScrapInvoices() {
+    return this.silverService.getScrapInvoices();
   }
 
   @Get('safe/balance')
@@ -106,7 +130,7 @@ export class SilverController {
 
   @Patch('safe/reset')
   @Roles(Role.OWNER)
-  @ApiOperation({ summary: 'تصفير خزنة الفضة بالكامل (تتطلب باسوورد الحماية)' })
+  @ApiOperation({ summary: 'تصفير خزنة الفضة بالكامل' })
   @ApiOkResponse({ description: 'تم تصفير الخزنة بنجاح' })
   async resetSafe(@Body() dto: AdjustSilverSafeDto, @Request() req: any) {
     const userId = req.user?._id || req.user?.id || req.user?.userId || req.user?.sub;
@@ -115,7 +139,7 @@ export class SilverController {
 
   @Patch('safe/adjust')
   @Roles(Role.OWNER)
-  @ApiOperation({ summary: 'تعديل رصيد خزنة الفضة لقيمة معينة (تتطلب باسوورد الحماية)' })
+  @ApiOperation({ summary: 'تعديل رصيد خزنة الفضة' })
   @ApiOkResponse({ description: 'تم تعديل رصيد الخزنة بنجاح' })
   async adjustSafeBalance(
     @Body() dto: AdjustSilverSafeDto,
