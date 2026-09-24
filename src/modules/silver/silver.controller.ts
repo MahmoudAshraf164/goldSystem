@@ -47,6 +47,21 @@ export class SilverController {
     return this.silverService.addSilverItem(dto);
   }
 
+  @Patch('items/:id/add-stock')
+  @Roles(Role.OWNER, Role.Employee)
+  @ApiOperation({ summary: 'إضافة وزن وكمية جديدة على صنف موجود بالفترة' })
+  @ApiOkResponse({ description: 'تم تحديث وزن الصنف وإتاحته بالمخزون' })
+  async addStockToExistingItem(
+    @Param('id') id: string,
+    @Body() body: { addedWeight: number; addedQuantity?: number },
+  ) {
+    return this.silverService.addStockToExistingItem(
+      id,
+      body.addedWeight,
+      body.addedQuantity,
+    );
+  }
+
   @Get('items')
   @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({ summary: 'عرض قطع الفضة المتاحة بالمخزن مع الفلترة والبحث' })
@@ -65,6 +80,14 @@ export class SilverController {
   @ApiOkResponse({ description: 'ملخص أوزان وأعداد الفضة بالتصنيف والعيار' })
   async getInventorySummary() {
     return this.silverService.getInventorySummary();
+  }
+
+  @Get('inventory/karat-summary')
+  @Roles(Role.OWNER, Role.Employee)
+  @ApiOperation({ summary: 'إجمالي أوزان الفضة مجتمعة حسب كل عيار' })
+  @ApiOkResponse({ description: 'ملخص الوزن والقطع المتاحة لكل عيار' })
+  async getKaratSummary() {
+    return this.silverService.getKaratSummary();
   }
 
   @Patch('items/:id')
