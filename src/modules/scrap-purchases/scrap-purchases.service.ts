@@ -99,10 +99,36 @@ export class ScrapPurchasesService {
     );
   }
 
-  // 2. جلب جميع عمليات شراء الكسر
-  async findAll(): Promise<ScrapPurchase[]> {
+  // 2. جلب جميع عمليات شراء الكسر مع المرونة في البحث بأي حقل من حقول الزبون
+  async findAll(
+    search?: string,
+    customerName?: string,
+    customerPhone?: string,
+  ): Promise<ScrapPurchase[]> {
+    const filter: any = {};
+
+    // 1. بحث عام وشامل بحقل search (يبحث في الاسم، رقم الهاتف، ورقم الفاتورة)
+    if (search && search.trim() !== '') {
+      const cleanSearch = search.trim();
+      filter.$or = [
+        { customerName: { $regex: cleanSearch,$options: 'i' } },
+        { customerPhone: { $regex: cleanSearch,$options: 'i' } },
+        { purchaseNumber: { $regex: cleanSearch,$options: 'i' } },
+      ];
+    }
+
+    // 2. بحث مخصص ومباشر بحقل اسم الزبون
+    if (customerName && customerName.trim() !== '') {
+      filter.customerName = { $regex: customerName.trim(),$options: 'i' };
+    }
+
+    // 3. بحث مخصص ومباشر بحقل رقم هاتف الزبون
+    if (customerPhone && customerPhone.trim() !== '') {
+      filter.customerPhone = { $regex: customerPhone.trim(),$options: 'i' };
+    }
+
     return this.scrapPurchaseModel
-      .find()
+      .find(filter)
       .populate('actionBy', 'fullName role')
       .sort({ createdAt: -1 })
       .exec();

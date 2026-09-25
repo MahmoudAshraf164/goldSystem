@@ -32,6 +32,9 @@ export class SilverSale {
 
   @Prop()
   notes?: string;
+  
+  @Prop({ default: false })
+  isCancelled: boolean;
 }
 
 export const SilverSaleSchema = SchemaFactory.createForClass(SilverSale);

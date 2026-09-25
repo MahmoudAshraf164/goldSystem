@@ -6,6 +6,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -16,6 +17,7 @@ import {
   ApiBearerAuth,
   ApiOperation,
   ApiParam,
+  ApiQuery,
 } from '@nestjs/swagger';
 import { ScrapPurchasesService } from './scrap-purchases.service';
 import { CreateScrapPurchaseDto } from './dto/create-scrap-purchases.dto';
@@ -54,9 +56,16 @@ export class ScrapPurchasesController {
   @Get()
   @HttpCode(HttpStatus.OK)
   @Roles(Role.OWNER, Role.Employee)
-  @ApiOperation({ summary: 'عرض جميع عمليات شراء الكسر المسجلة' })
-  async findAll() {
-    const purchases = await this.scrapPurchasesService.findAll();
+  @ApiOperation({ summary: 'عرض جميع عمليات شراء الكسر المسجلة مع البحث باسم الزبون أو هاتف' })
+  @ApiQuery({ name: 'search', required: false, description: 'البحث باسم الزبون أو رقم الهاتف أو رقم الفاتورة' })
+  @ApiQuery({ name: 'customerName', required: false, description: 'البحث المباشر باسم الزبون' })
+  @ApiQuery({ name: 'customerPhone', required: false, description: 'البحث المباشر برقم هاتف الزبون' })
+  async findAll(
+    @Query('search') search?: string,
+    @Query('customerName') customerName?: string,
+    @Query('customerPhone') customerPhone?: string,
+  ) {
+    const purchases = await this.scrapPurchasesService.findAll(search, customerName, customerPhone);
     return {
       message: 'تم جلب سجل مشتريات الذهب الكسر بنجاح',
       data: purchases,

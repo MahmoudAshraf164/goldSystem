@@ -47,84 +47,95 @@ export class StockMovementsService {
     return newLog.save();
   }
 
-  // جلب سجل التحركات وتحديد الصنف تلقائياً (Inventory / BarcodeInventory / ScrapGold)
-  async getMovements(inventoryItemId?: string): Promise<StockMovement[]> {
-    const filter: any = {};
-    if (inventoryItemId) {
-      filter.inventoryItem = new Types.ObjectId(inventoryItemId);
-    }
+ // في ملف stock-movements.service.ts
 
-    const movements = await this.movementModel
-      .find(filter)
-      .populate('actionBy', 'fullName role name')
-      .sort({ createdAt: -1 })
-      .exec();
+async getMovements(inventoryItemId?: string): Promise<StockMovement[]> {
+  const filter: any = {};
+  if (inventoryItemId) {
+    filter.inventoryItem = new Types.ObjectId(inventoryItemId);
+  }
 
-    const populatedMovements = await Promise.all(
-      movements.map(async (movement) => {
-        const movementObj: any = movement.toObject();
+  const movements = await this.movementModel
+    .find(filter)
+    .populate({
+      path: 'actionBy',
+      model: 'User', // التأكد من اسم Schema المستخدمين
+      select: 'fullName name username role', // جلب كافة خيارات الاسم الممكنة
+    })
+    .sort({ createdAt: -1 })
+    .exec();
 
-        // 1. البحث في المخزون العام (Inventory)
-        const newGoldItem = await this.movementModel.db
-          .model('Inventory')
+  const populatedMovements = await Promise.all(
+    movements.map(async (movement) => {
+      const movementObj: any = movement.toObject();
+
+      // معالجة حالة عدم وجود مستخدم مرتبط بالمعرف
+      if (!movementObj.actionBy) {
+        movementObj.actionBy = {
+          fullName: 'النظام / تلقائي',
+          role: 'SYSTEM',
+        };
+      }
+
+      // 1. البحث في المخزون العام (Inventory)
+      const newGoldItem = await this.movementModel.db
+        .model('Inventory')
+        .findById(movementObj.inventoryItem)
+        .select('title karat')
+        .exec();
+
+      if (newGoldItem) {
+        movementObj.inventoryItem = newGoldItem;
+        return movementObj;
+      }
+
+      // 2. البحث في مخزون الباركود (BarcodeInventory)
+      try {
+        const barcodeItem = await this.movementModel.db
+          .model('BarcodeInventory')
           .findById(movementObj.inventoryItem)
-          .select('title karat')
+          .select('title karat barcode')
           .exec();
 
-        if (newGoldItem) {
-          movementObj.inventoryItem = newGoldItem;
+        if (barcodeItem) {
+          movementObj.inventoryItem = {
+            _id: barcodeItem._id,
+            title: `[${barcodeItem.barcode}] ${barcodeItem.title}`,
+            karat: barcodeItem.karat,
+          };
           return movementObj;
         }
+      } catch (e) {}
 
-        // 2. البحث في مخزون الباركود (BarcodeInventory)
-        try {
-          const barcodeItem = await this.movementModel.db
-            .model('BarcodeInventory')
-            .findById(movementObj.inventoryItem)
-            .select('title karat barcode')
-            .exec();
+      // 3. البحث في الذهب الكسر (ScrapGold)
+      try {
+        const scrapGoldItem = await this.movementModel.db
+          .model('ScrapGold')
+          .findById(movementObj.inventoryItem)
+          .select('karat')
+          .exec();
 
-          if (barcodeItem) {
-            movementObj.inventoryItem = {
-              _id: barcodeItem._id,
-              title: `[${barcodeItem.barcode}] ${barcodeItem.title}`,
-              karat: barcodeItem.karat,
-            };
-            return movementObj;
-          }
-        } catch (e) {
-          // في حال عدم تسجيل Model للـ BarcodeInventory وقت التنفيذ
+        if (scrapGoldItem) {
+          movementObj.inventoryItem = {
+            _id: scrapGoldItem._id,
+            title: `ذهب كسر عيار ${scrapGoldItem.karat}`,
+            karat: scrapGoldItem.karat,
+          };
+          return movementObj;
         }
+      } catch (e) {}
 
-        // 3. البحث في الذهب الكسر (ScrapGold)
-        try {
-          const scrapGoldItem = await this.movementModel.db
-            .model('ScrapGold')
-            .findById(movementObj.inventoryItem)
-            .select('karat')
-            .exec();
+      // 4. صنف احتياطي
+      movementObj.inventoryItem = {
+        _id: movementObj.inventoryItem,
+        title: 'صنف من فاتورة تعديل / إرجاع قديم',
+        karat: null,
+      };
 
-          if (scrapGoldItem) {
-            movementObj.inventoryItem = {
-              _id: scrapGoldItem._id,
-              title: `ذهب كسر عيار ${scrapGoldItem.karat}`,
-              karat: scrapGoldItem.karat,
-            };
-            return movementObj;
-          }
-        } catch (e) {}
+      return movementObj;
+    }),
+  );
 
-        // 4. صنف احتياطي للحالات السابقة أو المحذوفة
-        movementObj.inventoryItem = {
-          _id: movementObj.inventoryItem,
-          title: 'صنف من فاتورة تعديل / إرجاع قديم',
-          karat: null,
-        };
-
-        return movementObj;
-      }),
-    );
-
-    return populatedMovements as any;
-  }
+  return populatedMovements as any;
+}
 }

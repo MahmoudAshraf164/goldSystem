@@ -2,9 +2,12 @@ import {
   Controller,
   Post,
   Get,
+  Patch,
+  Delete,
+  Param,
   Body,
   Req,
-  Query, // 👈 ضفنا الـ Query هنا لسحب الفلتر
+  Query,
   UseGuards,
   HttpCode,
   HttpStatus,
@@ -14,9 +17,12 @@ import {
   ApiBearerAuth,
   ApiOperation,
   ApiQuery,
+  ApiOkResponse,
+  ApiCreatedResponse,
 } from '@nestjs/swagger';
 import { ExpensesService } from './expenses.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
+import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -35,8 +41,9 @@ export class ExpensesController {
   @ApiOperation({
     summary: 'تسجيل مصروف نثري أو مشتريات ذهب جديدة (خروج كاش مباشر من الخزنة)',
   })
+  @ApiCreatedResponse({ description: 'تم تسجيل الحركة بنجاح' })
   async create(@Body() dto: CreateExpenseDto, @Req() req: any) {
-    const userId = req.user.id;
+    const userId = req.user.id || req.user._id || req.user.userId;
     const expense = await this.expensesService.createExpense(dto, userId);
     return {
       success: true,
@@ -46,7 +53,7 @@ export class ExpensesController {
   }
 
   @Get()
-  @Roles(Role.OWNER) // جرد الدفاتر التراكمي حكر على المالك فقط
+  @Roles(Role.OWNER)
   @HttpCode(HttpStatus.OK)
   @ApiQuery({
     name: 'category',
@@ -64,5 +71,54 @@ export class ExpensesController {
       success: true,
       data: expenses,
     };
+  }
+
+  @Get(':id')
+  @Roles(Role.OWNER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'عرض تفاصيل مصروف محدد بالـ ID' })
+  async findOne(@Param('id') id: string) {
+    const expense = await this.expensesService.findOne(id);
+    return {
+      success: true,
+      data: expense,
+    };
+  }
+
+  @Patch(':id')
+  @Roles(Role.OWNER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'تعديل بيانات مصروف وتسوية فارق المبلغ في الخزنة تلقائياً (للمالك فقط)',
+  })
+  @ApiOkResponse({ description: 'تم تعديل المصروف وتسوية الخزنة بنجاح' })
+  async update(
+    @Param('id') id: string,
+    @Body() dto: UpdateExpenseDto,
+    @Req() req: any,
+  ) {
+    const userId = req.user.id || req.user._id || req.user.userId;
+    const updatedExpense = await this.expensesService.updateExpense(
+      id,
+      dto,
+      userId,
+    );
+    return {
+      success: true,
+      message: 'تم تعديل المصروف وتسوية الخزنة بنجاح',
+      data: updatedExpense,
+    };
+  }
+
+  @Delete(':id')
+  @Roles(Role.OWNER)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'حذف مصروف وإعادة قيمته بالكامل إلى الخزنة (للمالك فقط)',
+  })
+  @ApiOkResponse({ description: 'تم حذف المصروف وإعادة المبلغ للخزنة بنجاح' })
+  async remove(@Param('id') id: string, @Req() req: any) {
+    const userId = req.user.id || req.user._id || req.user.userId;
+    return this.expensesService.deleteExpense(id, userId);
   }
 }

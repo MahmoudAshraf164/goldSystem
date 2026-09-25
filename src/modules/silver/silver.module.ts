@@ -13,6 +13,7 @@ import {
   SilverSafeTransactionSchema,
 } from './schemas/silver-safe-transaction.schema';
 import { CategoriesModule } from '../categories/categories.module';
+import { SilverSafeConfig, SilverSafeConfigSchema } from './schemas/silver-safe-config.schema';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { CategoriesModule } from '../categories/categories.module';
       { name: SilverSale.name, schema: SilverSaleSchema },
       { name: SilverScrapPurchase.name, schema: SilverScrapPurchaseSchema },
       { name: SilverSafeTransaction.name, schema: SilverSafeTransactionSchema },
+      { name: SilverSafeConfig.name, schema: SilverSafeConfigSchema },
     ]),
     CategoriesModule, // استيراد موديول التصنيفات لاستغلال العلاقة الديناميكية
   ],

@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   InternalServerErrorException,
+  ConflictException,
 } from '@nestjs/common';
 import { InjectModel, InjectConnection } from '@nestjs/mongoose';
 import { Model, Types, Connection } from 'mongoose';
@@ -45,7 +46,7 @@ export class BarcodeSalesService {
   }
 
   /**
-   * دالة مساعدة لتحديث مصفوفة التيكيتات (tagDetails) والمقادير بالمخزون العام عند البيع أو الإرجاع
+   * دالة مساعدة لتحديث مصفوفة التيكيتات والمقادير بالمخزون العام عند البيع أو الإرجاع
    */
   private async updateParentInventory(
     inventoryId: Types.ObjectId | string,
@@ -63,7 +64,6 @@ export class BarcodeSalesService {
 
     const countFactor = action === 'DEDUCT' ? -1 : 1;
 
-    // 1. تحديث الأعداد والأوزان الإجمالية
     parentInventory.currentCount = Math.max(
       0,
       parentInventory.currentCount + countFactor,
@@ -75,7 +75,6 @@ export class BarcodeSalesService {
       (parentInventory.totalNetWeight + netWeight * countFactor).toFixed(3),
     );
 
-    // 2. تحديث مصفوفة التيكيتات (tagDetails) إن وجد وزن للتيكيت
     if (
       tagWeight &&
       tagWeight > 0 &&
@@ -126,7 +125,6 @@ export class BarcodeSalesService {
       const cleanName = dto.customerName.trim();
       const cleanPhone = dto.phoneNumber?.trim();
 
-      // 1. البحث أولاً برقم الهاتف إن وجد
       if (cleanPhone) {
         const existingByPhone: any = await this.customersService.findByPhone(cleanPhone);
         if (existingByPhone?._id) {
@@ -134,7 +132,6 @@ export class BarcodeSalesService {
         }
       }
 
-      // 2. إذا لم نجده برقم الهاتف، نبحث باسم العميل في قاعدة البيانات
       const existingByName: any = await (this.customersService as any).customerModel?.findOne({
         fullName: cleanName,
         status: 'ACTIVE',
@@ -143,7 +140,6 @@ export class BarcodeSalesService {
         return existingByName._id as Types.ObjectId;
       }
 
-      // 3. إن لم يكن العميل موجوداً نهائياً، ننشئ عميلاً جديداً
       try {
         const newCustomer: any = await this.customersService.create({
           fullName: cleanName,
@@ -160,6 +156,33 @@ export class BarcodeSalesService {
     return undefined;
   }
 
+  /**
+   * دالة محسّنة ومضغوطة لاستخراج وتحسين الصور وتقليل حجم البيانات بالـ Response
+   */
+  private extractItemImages(item: any): string[] {
+    const rawItem = item?.toObject ? item.toObject() : item || {};
+    const parentInv = rawItem.inventoryRef || {};
+
+    const rawUrl =
+      rawItem.imageUrl ||
+      rawItem.image ||
+      (Array.isArray(rawItem.images) && rawItem.images[0]) ||
+      parentInv.imageUrl ||
+      parentInv.image ||
+      (Array.isArray(parentInv.images) && parentInv.images[0]) ||
+      null;
+
+    if (!rawUrl || typeof rawUrl !== 'string') return [];
+
+    // تحسين رابط الصورة إن كانت مستضافة على Cloudinary للحصول على الحجم والمقاس الأمثل
+    let optimizedUrl = rawUrl;
+    if (optimizedUrl.includes('res.cloudinary.com') && !optimizedUrl.includes('q_auto')) {
+      optimizedUrl = optimizedUrl.replace('/upload/', '/upload/f_auto,q_auto,w_300/');
+    }
+
+    return [optimizedUrl];
+  }
+
   // 1. إتمام عملية البيع بالباركود وإصدار الفاتورة
   async createInvoice(
     dto: CreateBarcodeInvoiceDto,
@@ -169,7 +192,6 @@ export class BarcodeSalesService {
     session.startTransaction();
 
     try {
-      // 🎯 معالجة وربط العميل بآمان
       const finalCustomerId = await this.resolveCustomerId(dto);
 
       const processedItems: Array<{
@@ -227,7 +249,6 @@ export class BarcodeSalesService {
           (goldTotalPrice + totalMakingCharge).toFixed(2),
         );
 
-        // 🖼️ استخراج صورة القطعة المفردة في مصفوفة
         const itemImages = this.extractItemImages(item);
 
         processedItems.push({
@@ -324,7 +345,7 @@ export class BarcodeSalesService {
     }
   }
 
-  // 2. جلب جميع الفواتير (مع معالجة الصور للفواتير)
+  // 2. جلب جميع الفواتير (مع تحسين الصور)
   async findAllInvoices(): Promise<BarcodeInvoice[]> {
     const invoices = await this.invoiceModel
       .find({ isCancelled: false })
@@ -348,6 +369,8 @@ export class BarcodeSalesService {
       invObj.items = invObj.items.map((it: any) => {
         if (!it.images || it.images.length === 0) {
           it.images = this.extractItemImages(it.item);
+        } else {
+          it.images = this.extractItemImages({ imageUrl: it.images[0] });
         }
         return it;
       });
@@ -383,6 +406,8 @@ export class BarcodeSalesService {
     invObj.items = invObj.items.map((it: any) => {
       if (!it.images || it.images.length === 0) {
         it.images = this.extractItemImages(it.item);
+      } else {
+        it.images = this.extractItemImages({ imageUrl: it.images[0] });
       }
       return it;
     });
@@ -409,7 +434,6 @@ export class BarcodeSalesService {
       throw new BadRequestException('لا يمكن تعديل فاتورة ملغاة');
     }
 
-    // 🎯 التأكد من العميل المربوط أو البحث عنه وتحديثه
     const updatedCustomerId = await this.resolveCustomerId(dto);
 
     const session = await this.connection.startSession();
@@ -619,41 +643,32 @@ export class BarcodeSalesService {
     }
   }
 
-  /**
-   * دالة مساعدة لاستخراج صور القطعة من كائن الباركود (imageUrl) أو المظلة الأم
-   */
-  private extractItemImages(item: any): string[] {
-    const rawItem = item?.toObject ? item.toObject() : item || {};
-    const parentInv = rawItem.inventoryRef || {};
-
-    const singleImage =
-      rawItem.imageUrl ||
-      rawItem.image ||
-      (Array.isArray(rawItem.images) && rawItem.images[0]) ||
-      parentInv.imageUrl ||
-      parentInv.image ||
-      (Array.isArray(parentInv.images) && parentInv.images[0]) ||
-      null;
-
-    return singleImage ? [singleImage] : [];
-  }
-
-  // 5. إلغاء الفاتورة
+  // 5. إلغاء الفاتورة (محمية ضد הـ Race Condition والـ Double Click بالكامل)
   async cancelInvoice(id: string, userId: string): Promise<BarcodeInvoice> {
-    const invoice = await this.invoiceModel.findById(id);
-    if (!invoice) {
-      throw new NotFoundException('الفاتورة غير موجودة');
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('معرف الفاتورة غير صالح');
     }
 
-    if (invoice.isCancelled) {
-      throw new BadRequestException('الفاتورة ملغاة بالفعل');
+    // 🔒 1. قفل الفاتورة ذرّياً قبل البدء في أي عملية (Atomic Lock)
+    const lockedInvoice = await this.invoiceModel.findOneAndUpdate(
+      { _id: id, isCancelled: false },
+      { $set: { isCancelled: true, status: 'CANCELLED' } },
+      { new: true },
+    );
+
+    if (!lockedInvoice) {
+      const checkInvoice = await this.invoiceModel.findById(id);
+      if (!checkInvoice) {
+        throw new NotFoundException('الفاتورة غير موجودة');
+      }
+      throw new ConflictException('تم إلغاء الفاتورة بالفعل، أو يتم معالجة طلب إلغاء سابق حالياً');
     }
 
     const session = await this.connection.startSession();
     session.startTransaction();
 
     try {
-      for (const itemRef of invoice.items) {
+      for (const itemRef of lockedInvoice.items) {
         const barcodeItem = await this.barcodeInventoryModel
           .findById(itemRef.item)
           .session(session);
@@ -685,21 +700,17 @@ export class BarcodeSalesService {
             grossWeightChange: barcodeItem.grossWeight,
             netWeightChange: barcodeItem.netWeight,
             actionBy: userId,
-            reason: `إرجاع القطعة [${barcodeItem.barcode}] للمخزون العام نتيجة إلغاء الفاتورة رقم (${invoice.invoiceNumber})`,
+            reason: `إرجاع القطعة [${barcodeItem.barcode}] للمخزون العام نتيجة إلغاء الفاتورة رقم (${lockedInvoice.invoiceNumber})`,
           });
         }
       }
 
       await this.safeService.triggerTransaction(
-        invoice.finalPaidAmount,
+        lockedInvoice.finalPaidAmount,
         'OUTFLOW',
-        `إلغاء واسترداد فاتورة بيع باركود رقم (${invoice.invoiceNumber})`,
+        `إلغاء واسترداد فاتورة بيع باركود رقم (${lockedInvoice.invoiceNumber})`,
         userId,
       );
-
-      invoice.isCancelled = true;
-      invoice.status = 'CANCELLED';
-      await invoice.save({ session });
 
       await session.commitTransaction();
       session.endSession();
@@ -708,6 +719,13 @@ export class BarcodeSalesService {
     } catch (error) {
       await session.abortTransaction();
       session.endSession();
+
+      // التراجع عن حالة القفل في حال حدوث خطأ غير متوقع
+      await this.invoiceModel.updateOne(
+        { _id: id },
+        { $set: { isCancelled: false, status: 'ACTIVE' } },
+      );
+
       throw new InternalServerErrorException('حدث خطأ أثناء إلغاء الفاتورة');
     }
   }

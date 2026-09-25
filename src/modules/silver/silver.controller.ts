@@ -24,6 +24,10 @@ import {
   BuySilverScrapDto,
   AdjustSilverSafeDto,
   SilverReportQueryDto,
+  AddStockDto,
+  CancelSilverInvoiceDto,
+  UpdateSilverSafePasswordDto,
+  GetSilverSafeBalanceDto,
 } from './dto/silver.dto';
 import { UpdateSilverItemDto } from './dto/UpdateSilverItem.dto';
 import { GetSilverItemsQueryDto } from './dto/get-silver-items-query.dto';
@@ -49,16 +53,16 @@ export class SilverController {
 
   @Patch('items/:id/add-stock')
   @Roles(Role.OWNER, Role.Employee)
-  @ApiOperation({ summary: 'إضافة وزن وكمية جديدة على صنف موجود بالفترة' })
+  @ApiOperation({ summary: 'إضافة وزن وكمية جديدة على صنف موجود بالفعل' })
   @ApiOkResponse({ description: 'تم تحديث وزن الصنف وإتاحته بالمخزون' })
   async addStockToExistingItem(
     @Param('id') id: string,
-    @Body() body: { addedWeight: number; addedQuantity?: number },
+    @Body() dto: AddStockDto,
   ) {
     return this.silverService.addStockToExistingItem(
       id,
-      body.addedWeight,
-      body.addedQuantity,
+      dto.addedWeight,
+      dto.addedQuantity,
     );
   }
 
@@ -126,6 +130,19 @@ export class SilverController {
     return this.silverService.getSalesInvoices();
   }
 
+  @Patch('sales/invoices/:id/cancel')
+  @Roles(Role.OWNER, Role.Employee)
+  @ApiOperation({ summary: 'إلغاء فاتورة بيع فضة وإرجاع الوزن للمخزون وخصم المبلغ من الخزنة' })
+  @ApiOkResponse({ description: 'تم إلغاء الفاتورة واسترداد المخزون بنجاح' })
+  async cancelSaleInvoice(
+    @Param('id') id: string,
+    @Body() dto: CancelSilverInvoiceDto,
+    @Request() req: any,
+  ) {
+    const userId = req.user?._id || req.user?.id || req.user?.userId || req.user?.sub;
+    return this.silverService.cancelSaleInvoice(id, userId, dto.reason);
+  }
+
   @Post('scrap/buy')
   @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({ summary: 'شراء كسر فضة من زبون' })
@@ -143,17 +160,33 @@ export class SilverController {
     return this.silverService.getScrapInvoices();
   }
 
-  @Get('safe/balance')
+  @Get('scrap/inventory')
   @Roles(Role.OWNER, Role.Employee)
-  @ApiOperation({ summary: 'عرض الرصيد النقدي الحالي لخزنة الفضة' })
+  @ApiOperation({ summary: 'عرض مخزون كسر الفضة المتاح مقسم ومحسوب حسب كل عيار' })
+  @ApiOkResponse({ description: 'ملخص أوزان كسر الفضة لكل عيار' })
+  async getScrapInventorySummary() {
+    return this.silverService.getScrapInventorySummary();
+  }
+
+  @Patch('safe/password')
+  @Roles(Role.OWNER)
+  @ApiOperation({ summary: 'تعيين أو تغيير كلمة سر خزنة الفضة (للمالك فقط)' })
+  @ApiOkResponse({ description: 'تم تحديث كلمة السر بنجاح' })
+  async updateSafePassword(@Body() dto: UpdateSilverSafePasswordDto) {
+    return this.silverService.updateSafePassword(dto);
+  }
+
+  @Post('safe/balance')
+  @Roles(Role.OWNER)
+  @ApiOperation({ summary: 'عرض الرصيد النقدي الحالي لخزنة الفضة (يتطلب كلمة سر الخزنة)' })
   @ApiOkResponse({ description: 'رصيد خزنة الفضة النقدي' })
-  async getSafeBalance() {
-    return this.silverService.getSilverSafeBalance();
+  async getSafeBalance(@Body() dto: GetSilverSafeBalanceDto) {
+    return this.silverService.getSilverSafeBalance(dto.securityPassword);
   }
 
   @Patch('safe/reset')
   @Roles(Role.OWNER)
-  @ApiOperation({ summary: 'تصفير خزنة الفضة بالكامل' })
+  @ApiOperation({ summary: 'تصفير خزنة الفضة بالكامل (يتطلب كلمة سر الخزنة)' })
   @ApiOkResponse({ description: 'تم تصفير الخزنة بنجاح' })
   async resetSafe(@Body() dto: AdjustSilverSafeDto, @Request() req: any) {
     const userId = req.user?._id || req.user?.id || req.user?.userId || req.user?.sub;
@@ -162,7 +195,7 @@ export class SilverController {
 
   @Patch('safe/adjust')
   @Roles(Role.OWNER)
-  @ApiOperation({ summary: 'تعديل رصيد خزنة الفضة' })
+  @ApiOperation({ summary: 'تعديل رصيد خزنة الفضة (يتطلب كلمة سر الخزنة)' })
   @ApiOkResponse({ description: 'تم تعديل رصيد الخزنة بنجاح' })
   async adjustSafeBalance(
     @Body() dto: AdjustSilverSafeDto,
@@ -174,14 +207,9 @@ export class SilverController {
 
   @Get('reports')
   @Roles(Role.OWNER, Role.Employee)
-  @ApiOperation({ summary: 'تقارير حركة الفضة المالية والوزنية للفترة المحددة' })
+  @ApiOperation({ summary: 'تقارير حركة الفضة المالية والوزنية (اليوم، الأمس، الأسبوع الماضي، أو نطاق مخصص)' })
   @ApiOkResponse({ description: 'تقرير مبيعات ومشتريات الفضة والخزنة' })
   async getReport(@Query() query: SilverReportQueryDto) {
-    const start = query.startDate
-      ? new Date(query.startDate)
-      : new Date(new Date().setHours(0, 0, 0, 0));
-    const end = query.endDate ? new Date(query.endDate) : new Date();
-
-    return this.silverService.getSilverReport(start, end);
+    return this.silverService.getSilverReport(query);
   }
 }
