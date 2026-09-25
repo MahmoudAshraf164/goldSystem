@@ -64,15 +64,11 @@ export class BarcodeInventoryService {
     return tags;
   }
 
-  /**
-   * دالة مساعدة لتوفير الصورة بداخل مصفوفة images للتوافق مع الفواتير والـ Frontend
-   */
   private formatItemWithImages(itemDoc: any): any {
     if (!itemDoc) return itemDoc;
     const item = itemDoc.toObject ? itemDoc.toObject() : itemDoc;
     const parentInv = item.inventoryRef || {};
 
-    // أخذ الصورة المفردة من القطعة أو من المخزون الأم عند عدم وجودها
     const singleImage =
       item.imageUrl ||
       item.image ||
@@ -88,7 +84,7 @@ export class BarcodeInventoryService {
     };
   }
 
-  // 1. إضافة قطعة جديدة
+  // 1. إضافة قطعة باركود جديدة وتحديث المخزون الرئيسي آلياً
   async createItem(
     dto: CreateBarcodeItemDto,
     userId: string,
@@ -128,24 +124,30 @@ export class BarcodeInventoryService {
     try {
       let inventoryItem: InventoryDocument | null = null;
 
-      if (dto.inventoryId) {
+      // أ) البحث بالـ ID إن وُجد
+      if (dto.inventoryId && Types.ObjectId.isValid(dto.inventoryId)) {
         inventoryItem = await this.inventoryModel
           .findOne({ _id: dto.inventoryId, isArchived: false })
           .session(session)
           .exec();
-      } else {
+      }
+
+      // ب) التجميع التلقائي بناءً على العيار والشركة والتصنيف إن لم يُمرر inventoryId
+      if (!inventoryItem) {
         const filter: any = {
           karat: dto.karat,
           companyName: cleanedCompanyName,
           isArchived: false,
         };
         if (dto.category) filter.category = new Types.ObjectId(dto.category);
+
         inventoryItem = await this.inventoryModel
           .findOne(filter)
           .session(session)
           .exec();
       }
 
+      // ج) إنشاء المجموعة آلياً إن لم توجد مسبقاً
       if (!inventoryItem) {
         inventoryItem = new this.inventoryModel({
           title: dto.title,
@@ -160,6 +162,7 @@ export class BarcodeInventoryService {
           tagDetails: tagWeight > 0 ? [{ count: 1, weight: tagWeight }] : [],
         });
       } else {
+        // د) تحديث إحصائيات المخزون الرئيسي آلياً
         inventoryItem.initialCount += 1;
         inventoryItem.currentCount += 1;
         inventoryItem.initialGrossWeight = parseFloat(
@@ -259,168 +262,165 @@ export class BarcodeInventoryService {
     return items.map((item) => this.formatItemWithImages(item));
   }
 
-  // 4. تعديل قطعة بالباركود
-// 4. تعديل قطعة بالباركود
-async updateItem(
-  idOrBarcode: string,
-  updateDto: UpdateBarcodeItemDto,
-  userId: string,
-  imageUrl: string | null = null,
-): Promise<BarcodeInventory> {
-  const isObjectId = Types.ObjectId.isValid(idOrBarcode);
-  const query = isObjectId
-    ? { _id: idOrBarcode, isArchived: false }
-    : { barcode: idOrBarcode.trim(), isArchived: false };
+  // 4. تعديل قطعة الباركود وإعادة مزامنة الحسابات مع المخزون الرئيسي
+  async updateItem(
+    idOrBarcode: string,
+    updateDto: UpdateBarcodeItemDto,
+    userId: string,
+    imageUrl: string | null = null,
+  ): Promise<BarcodeInventory> {
+    const isObjectId = Types.ObjectId.isValid(idOrBarcode);
+    const query = isObjectId
+      ? { _id: idOrBarcode, isArchived: false }
+      : { barcode: idOrBarcode.trim(), isArchived: false };
 
-  const item = await this.barcodeInventoryModel.findOne(query).exec();
+    const item = await this.barcodeInventoryModel.findOne(query).exec();
 
-  if (!item) {
-    throw new NotFoundException('القطعة المطلوبة غير موجودة أو مؤرشفة');
-  }
-
-  if (item.status === 'SOLD') {
-    throw new BadRequestException('لا يمكن تعديل قطعة مباعة بالفعل!');
-  }
-
-  // 🔴 منع تغيير الباركود إلى باركود مستخدم بقطعة أخرى
-  if (updateDto.barcode && updateDto.barcode.trim() !== item.barcode) {
-    const existingWithBarcode = await this.barcodeInventoryModel
-      .findOne({
-        barcode: updateDto.barcode.trim(),
-        _id: { $ne: item._id },
-      })
-      .exec();
-
-    if (existingWithBarcode) {
-      throw new BadRequestException(
-        `الباركود (${updateDto.barcode}) مستخدم بالفعل لقطعة أخرى!`,
-      );
-    }
-  }
-
-  const grossWeight = updateDto.grossWeight ?? item.grossWeight;
-  const tagWeight = updateDto.tagWeight ?? item.tagWeight;
-  const netWeight = parseFloat((grossWeight - tagWeight).toFixed(3));
-
-  if (netWeight <= 0) {
-    throw new BadRequestException('الوزن الصافي الناتج غير صالح!');
-  }
-
-  const updatedImageUrl = imageUrl ? imageUrl : item.imageUrl;
-
-  // 🟢 استخراج معرف المخزون الرئيسي سواء مرره الفرونت باسم inventoryRef أو inventoryId
-  const rawNewInvId = updateDto.inventoryRef || updateDto.inventoryId;
-  const oldInvId = item.inventoryRef ? item.inventoryRef.toString() : null;
-  const newInvId = rawNewInvId ? rawNewInvId.toString() : oldInvId;
-
-  if (oldInvId && newInvId && oldInvId !== newInvId) {
-    const oldInv = await this.inventoryModel.findById(oldInvId).exec();
-    if (oldInv) {
-      oldInv.currentCount = Math.max(0, oldInv.currentCount - 1);
-      oldInv.totalGrossWeight = parseFloat(
-        Math.max(0, oldInv.totalGrossWeight - item.grossWeight).toFixed(3),
-      );
-      oldInv.totalNetWeight = parseFloat(
-        Math.max(0, oldInv.totalNetWeight - item.netWeight).toFixed(3),
-      );
-      oldInv.tagDetails = this.updateTagDetailsList(
-        oldInv.tagDetails,
-        item.tagWeight,
-        -1,
-      );
-      await oldInv.save();
+    if (!item) {
+      throw new NotFoundException('القطعة المطلوبة غير موجودة أو مؤرشفة');
     }
 
-    const newInv = await this.inventoryModel.findById(newInvId).exec();
-    if (newInv) {
-      newInv.currentCount += 1;
-      newInv.totalGrossWeight = parseFloat(
-        (newInv.totalGrossWeight + grossWeight).toFixed(3),
-      );
-      newInv.totalNetWeight = parseFloat(
-        (newInv.totalNetWeight + netWeight).toFixed(3),
-      );
-      newInv.tagDetails = this.updateTagDetailsList(
-        newInv.tagDetails,
-        tagWeight,
-        1,
-      );
-      await newInv.save();
+    if (item.status === 'SOLD') {
+      throw new BadRequestException('لا يمكن تعديل قطعة مباعة بالفعل!');
     }
-  } else if (newInvId) {
-    const weightDiffGross = parseFloat(
-      (grossWeight - item.grossWeight).toFixed(3),
-    );
-    const weightDiffNet = parseFloat((netWeight - item.netWeight).toFixed(3));
 
-    const invItem = await this.inventoryModel.findById(newInvId).exec();
-    if (invItem) {
-      invItem.totalGrossWeight = parseFloat(
-        (invItem.totalGrossWeight + weightDiffGross).toFixed(3),
-      );
-      invItem.totalNetWeight = parseFloat(
-        (invItem.totalNetWeight + weightDiffNet).toFixed(3),
-      );
+    if (updateDto.barcode && updateDto.barcode.trim() !== item.barcode) {
+      const existingWithBarcode = await this.barcodeInventoryModel
+        .findOne({
+          barcode: updateDto.barcode.trim(),
+          _id: { $ne: item._id },
+        })
+        .exec();
 
-      if (item.tagWeight !== tagWeight) {
-        invItem.tagDetails = this.updateTagDetailsList(
-          invItem.tagDetails,
+      if (existingWithBarcode) {
+        throw new BadRequestException(
+          `الباركود (${updateDto.barcode}) مستخدم بالفعل لقطعة أخرى!`,
+        );
+      }
+    }
+
+    const grossWeight = updateDto.grossWeight ?? item.grossWeight;
+    const tagWeight = updateDto.tagWeight ?? item.tagWeight;
+    const netWeight = parseFloat((grossWeight - tagWeight).toFixed(3));
+
+    if (netWeight <= 0) {
+      throw new BadRequestException('الوزن الصافي الناتج غير صالح!');
+    }
+
+    const updatedImageUrl = imageUrl ? imageUrl : item.imageUrl;
+
+    const rawNewInvId = updateDto.inventoryRef || updateDto.inventoryId;
+    const oldInvId = item.inventoryRef ? item.inventoryRef.toString() : null;
+    const newInvId = rawNewInvId ? rawNewInvId.toString() : oldInvId;
+
+    // نقل القطعة من مخزون إلى آخر
+    if (oldInvId && newInvId && oldInvId !== newInvId) {
+      const oldInv = await this.inventoryModel.findById(oldInvId).exec();
+      if (oldInv) {
+        oldInv.currentCount = Math.max(0, oldInv.currentCount - 1);
+        oldInv.totalGrossWeight = parseFloat(
+          Math.max(0, oldInv.totalGrossWeight - item.grossWeight).toFixed(3),
+        );
+        oldInv.totalNetWeight = parseFloat(
+          Math.max(0, oldInv.totalNetWeight - item.netWeight).toFixed(3),
+        );
+        oldInv.tagDetails = this.updateTagDetailsList(
+          oldInv.tagDetails,
           item.tagWeight,
           -1,
         );
-        invItem.tagDetails = this.updateTagDetailsList(
-          invItem.tagDetails,
+        await oldInv.save();
+      }
+
+      const newInv = await this.inventoryModel.findById(newInvId).exec();
+      if (newInv) {
+        newInv.currentCount += 1;
+        newInv.totalGrossWeight = parseFloat(
+          (newInv.totalGrossWeight + grossWeight).toFixed(3),
+        );
+        newInv.totalNetWeight = parseFloat(
+          (newInv.totalNetWeight + netWeight).toFixed(3),
+        );
+        newInv.tagDetails = this.updateTagDetailsList(
+          newInv.tagDetails,
           tagWeight,
           1,
         );
+        await newInv.save();
       }
+    } else if (newInvId) {
+      // تعديل الأوزان والـ Tags بنفس المخزون الرئيسي
+      const weightDiffGross = parseFloat(
+        (grossWeight - item.grossWeight).toFixed(3),
+      );
+      const weightDiffNet = parseFloat((netWeight - item.netWeight).toFixed(3));
 
-      await invItem.save();
+      const invItem = await this.inventoryModel.findById(newInvId).exec();
+      if (invItem) {
+        invItem.totalGrossWeight = parseFloat(
+          (invItem.totalGrossWeight + weightDiffGross).toFixed(3),
+        );
+        invItem.totalNetWeight = parseFloat(
+          (invItem.totalNetWeight + weightDiffNet).toFixed(3),
+        );
+
+        if (item.tagWeight !== tagWeight) {
+          invItem.tagDetails = this.updateTagDetailsList(
+            invItem.tagDetails,
+            item.tagWeight,
+            -1,
+          );
+          invItem.tagDetails = this.updateTagDetailsList(
+            invItem.tagDetails,
+            tagWeight,
+            1,
+          );
+        }
+
+        await invItem.save();
+      }
     }
+
+    const updateData: any = {
+      ...updateDto,
+      grossWeight,
+      tagWeight,
+      netWeight,
+      imageUrl: updatedImageUrl,
+      inventoryRef: newInvId ? new Types.ObjectId(newInvId) : item.inventoryRef,
+      companyName:
+        updateDto.companyName !== undefined
+          ? updateDto.companyName.trim() || '-'
+          : item.companyName,
+    };
+
+    if (updateDto.category) {
+      updateData.category = new Types.ObjectId(updateDto.category);
+    }
+
+    delete updateData.inventoryId;
+    delete updateData.file;
+
+    if (!updateDto.barcode) {
+      delete updateData.barcode;
+    } else {
+      updateData.barcode = updateDto.barcode.trim();
+    }
+
+    const updatedItem = await this.barcodeInventoryModel
+      .findByIdAndUpdate(item._id, updateData, { new: true })
+      .populate('category', 'name')
+      .populate('inventoryRef')
+      .exec();
+
+    if (!updatedItem) {
+      throw new NotFoundException('فشل تعديل القطعة');
+    }
+
+    return this.formatItemWithImages(updatedItem);
   }
 
-  // 🟢 استبعاد الحقول الحساسة والتأكد من تحويل الـ strings لـ ObjectIds
-  const updateData: any = {
-    ...updateDto,
-    grossWeight,
-    tagWeight,
-    netWeight,
-    imageUrl: updatedImageUrl,
-    inventoryRef: newInvId ? new Types.ObjectId(newInvId) : item.inventoryRef,
-    companyName:
-      updateDto.companyName !== undefined
-        ? updateDto.companyName.trim() || '-'
-        : item.companyName,
-  };
-
-  if (updateDto.category) {
-    updateData.category = new Types.ObjectId(updateDto.category);
-  }
-
-  // حذف الحقول غير المطلوبة بالـ Schema لتفادي أي مشاكل
-  delete updateData.inventoryId;
-  delete updateData.file;
-
-  // إذا لم يتم تغيير الباركود أو تم تركه فارغاً احتفظ بالقديم
-  if (!updateDto.barcode) {
-    delete updateData.barcode;
-  } else {
-    updateData.barcode = updateDto.barcode.trim();
-  }
-
-  const updatedItem = await this.barcodeInventoryModel
-    .findByIdAndUpdate(item._id, updateData, { new: true })
-    .populate('category', 'name')
-    .populate('inventoryRef')
-    .exec();
-
-  if (!updatedItem) {
-    throw new NotFoundException('فشل تعديل القطعة');
-  }
-
-  return this.formatItemWithImages(updatedItem);
-}
-  // 5. الحذف الناعم
+  // 5. الحذف الناعم والتنقيص التلقائي من المخزون الرئيسي
   async softDelete(id: string, userId: string): Promise<void> {
     const item = await this.barcodeInventoryModel
       .findOne({ _id: id, isArchived: false })
@@ -486,7 +486,7 @@ async updateItem(
     return items.map((item) => this.formatItemWithImages(item));
   }
 
-  // 7. توليد صورة الباركود Base64
+  // 7. توليد صورة الباركود
   async generateBarcodeImage(
     barcode: string,
   ): Promise<{ barcode: string; imageBase64: string }> {
@@ -511,7 +511,7 @@ async updateItem(
     }
   }
 
-  // 8. تغيير الحالة لـ SOLD عند البيع
+  // 8. البيع الخصم التلقائي من المخزون الرئيسي
   async markAsSold(barcode: string, session?: any): Promise<BarcodeInventory> {
     const item = await this.barcodeInventoryModel
       .findOne({ barcode: barcode.trim(), isArchived: false })
