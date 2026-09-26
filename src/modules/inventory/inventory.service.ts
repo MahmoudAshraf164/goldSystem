@@ -335,7 +335,7 @@ export class InventoryService {
     private readonly movementsService: StockMovementsService,
   ) {}
 
-  // 1. إنشاء مجموعة مخزون رئيسية جديدة (تكون فارغة وقابلة للتكويذ بناءً عليها)
+  // 1. إنشاء مجموعة مخزون رئيسية جديدة (تكون فارغة وقابلة للتكويد بناءً عليها)
   async create(
     createInventoryDto: CreateInventoryDto,
     userId: string,
@@ -388,7 +388,7 @@ export class InventoryService {
     return savedItem;
   }
 
-  // 2. تعديل بيانات مجموعة المخزون الأساسية (تغيير العنوان أو الشركة)
+  // 2. تعديل بيانات مجموعة المخزون الأساسية (تغيير العنوان، الشركة، أو الأعداد/الأوزان الأولية)
   async update(
     id: string,
     updateInventoryDto: UpdateInventoryDto,
@@ -402,7 +402,11 @@ export class InventoryService {
       throw new NotFoundException('مجموعة الذهب المطلوبة غير موجودة أو مؤرشفة');
     }
 
-    const updateData: any = { ...updateInventoryDto };
+    const updateData: Record<string, any> = {};
+
+    if (updateInventoryDto.title !== undefined) {
+      updateData.title = updateInventoryDto.title.trim();
+    }
 
     if (updateInventoryDto.companyName !== undefined) {
       updateData.companyName = updateInventoryDto.companyName.trim() || '-';
@@ -412,13 +416,39 @@ export class InventoryService {
       updateData.category = new Types.ObjectId(updateInventoryDto.category);
     }
 
+    // تعديل العدد الأولي مباشرة (الطرف الأيسر من النسبة)
+    if (updateInventoryDto.initialCount !== undefined) {
+      updateData.initialCount = updateInventoryDto.initialCount;
+    }
+
+    // تعديل الوزن القائم الأولي
+    if (updateInventoryDto.initialGrossWeight !== undefined) {
+      updateData.initialGrossWeight = updateInventoryDto.initialGrossWeight;
+    }
+
     const updatedItem = await this.inventoryModel
-      .findByIdAndUpdate(id, updateData, { new: true })
+      .findByIdAndUpdate(id, { $set: updateData }, { new: true })
       .populate('category', 'name')
       .exec();
 
     if (!updatedItem) {
       throw new NotFoundException('مجموعة الذهب المطلوبة غير موجودة أو مؤرشفة');
+    }
+
+    // تسجيل اللوج للتعديلات الابتدائية دون مساس برصيد المبيعات والقطع الحالية
+    if (
+      updateInventoryDto.initialCount !== undefined ||
+      updateInventoryDto.initialGrossWeight !== undefined
+    ) {
+      await this.movementsService.logMovement({
+        inventoryItem: updatedItem._id.toString(),
+        type: 'INVENTORY_IN',
+        countChange: 0,
+        grossWeightChange: 0,
+        netWeightChange: 0,
+        actionBy: userId,
+        reason: `تعديل القيمة الابتدائية للمجموعة: (${updatedItem.title}) - العدد الأولي الجديد: ${updatedItem.initialCount}`,
+      });
     }
 
     return updatedItem;
