@@ -109,7 +109,7 @@ export class BarcodeSalesService {
     phoneNumber?: string;
     country?: string;
   }): Promise<Types.ObjectId> {
-    // 1. إذا تم اختيار العميل بالـ ID من القائمة
+    // 1. إذا تم اختيار العميل بالـ ID
     if (dto.customerId && Types.ObjectId.isValid(dto.customerId)) {
       const customer = await this.customersService.findById(dto.customerId);
       if (customer) {
@@ -117,28 +117,31 @@ export class BarcodeSalesService {
       }
     }
 
-    // 2. معالجة اسم العميل (إجباري)
-    const cleanName = dto.customerName.trim();
+    // 2. التحقق من اسم العميل
+    const cleanName = dto.customerName?.trim();
     if (!cleanName) {
       throw new BadRequestException('اسم العميل مطلوب لإنشاء الفاتورة');
     }
 
-    const cleanPhone = dto.phoneNumber?.trim();
-    const cleanCountry = dto.country?.trim();
+    const cleanPhone =
+      dto.phoneNumber && dto.phoneNumber.trim() !== ''
+        ? dto.phoneNumber.trim()
+        : undefined;
+    const cleanCountry =
+      dto.country && dto.country.trim() !== ''
+        ? dto.country.trim()
+        : undefined;
 
-    // البحث برقم الهاتف أولاً للتحقق من عدم وجوده
+    // 3. البحث برقم الهاتف إذا كان متوفراً وحقيقياً
     if (cleanPhone) {
-      const existingByPhone: any =
-        await this.customersService.findByPhone(cleanPhone);
+      const existingByPhone: any = await this.customersService.findByPhone(cleanPhone);
       if (existingByPhone?._id) {
         return existingByPhone._id as Types.ObjectId;
       }
     }
 
-    // البحث باسم العميل
-    const existingByName: any = await (
-      this.customersService as any
-    ).customerModel?.findOne({
+    // 4. البحث باسم العميل
+    const existingByName: any = await (this.customersService as any).customerModel?.findOne({
       fullName: cleanName,
       status: 'ACTIVE',
     });
@@ -146,7 +149,7 @@ export class BarcodeSalesService {
       return existingByName._id as Types.ObjectId;
     }
 
-    // إنشاء عميل جديد تلقائياً باسم العميل المدخل
+    // 5. إنشاء عميل جديد تلقائياً
     const newCustomer: any = await this.customersService.create({
       fullName: cleanName,
       phoneNumber: cleanPhone,
@@ -176,14 +179,8 @@ export class BarcodeSalesService {
     if (!rawUrl || typeof rawUrl !== 'string') return [];
 
     let optimizedUrl = rawUrl;
-    if (
-      optimizedUrl.includes('res.cloudinary.com') &&
-      !optimizedUrl.includes('q_auto')
-    ) {
-      optimizedUrl = optimizedUrl.replace(
-        '/upload/',
-        '/upload/f_auto,q_auto,w_300/',
-      );
+    if (optimizedUrl.includes('res.cloudinary.com') && !optimizedUrl.includes('q_auto')) {
+      optimizedUrl = optimizedUrl.replace('/upload/', '/upload/f_auto,q_auto,w_300/');
     }
 
     return [optimizedUrl];
@@ -670,9 +667,7 @@ export class BarcodeSalesService {
       if (!checkInvoice) {
         throw new NotFoundException('الفاتورة غير موجودة');
       }
-      throw new ConflictException(
-        'تم إلغاء الفاتورة بالفعل، أو يتم معالجة طلب إلغاء سابق حالياً',
-      );
+      throw new ConflictException('تم إلغاء الفاتورة بالفعل، أو يتم معالجة طلب إلغاء سابق حالياً');
     }
 
     const session = await this.connection.startSession();

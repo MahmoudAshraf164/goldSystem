@@ -8,7 +8,7 @@ import {
   ArrayMinSize,
   IsNotEmpty,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class BarcodeSaleItemDto {
@@ -56,6 +56,7 @@ export class CreateBarcodeInvoiceDto {
   })
   @IsString({ message: 'اسم العميل يجب أن يكون نصاً' })
   @IsNotEmpty({ message: 'اسم العميل مطلوب ولا يمكن أن يكون فارغاً' })
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
   customerName: string;
 
   @ApiPropertyOptional({
@@ -64,6 +65,7 @@ export class CreateBarcodeInvoiceDto {
   })
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => (value === '' ? undefined : value))
   customerId?: string;
 
   @ApiPropertyOptional({
@@ -72,6 +74,7 @@ export class CreateBarcodeInvoiceDto {
   })
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => (value === '' || value === null ? undefined : typeof value === 'string' ? value.trim() : value))
   phoneNumber?: string;
 
   @ApiPropertyOptional({
@@ -80,5 +83,6 @@ export class CreateBarcodeInvoiceDto {
   })
   @IsOptional()
   @IsString()
+  @Transform(({ value }) => (value === '' || value === null ? undefined : typeof value === 'string' ? value.trim() : value))
   country?: string;
 }
