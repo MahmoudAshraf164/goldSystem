@@ -31,11 +31,39 @@ export class BarcodeInventoryService {
     private readonly movementsService: StockMovementsService,
   ) {}
 
+  // توليد باركود فريد يضمن عدم التكرار حتى عند الحذف أو الأرشفة
   private async generateUniqueBarcode(karat: number): Promise<string> {
     const currentYear = new Date().getFullYear().toString();
-    const count = await this.barcodeInventoryModel.countDocuments().exec();
-    const nextSequence = (count + 1).toString().padStart(5, '0');
-    return `${karat}${currentYear}${nextSequence}`;
+    const prefix = `${karat}${currentYear}`;
+
+    // 1. البحث عن آخر قطعة تم إنشاؤها بنفس العيار والسنة
+    const lastItem = await this.barcodeInventoryModel
+      .findOne({ barcode: new RegExp(`^${prefix}`) })
+      .sort({ barcode: -1 })
+      .exec();
+
+    let sequence = 1;
+
+    if (lastItem && lastItem.barcode) {
+      // استخراج الجزء الرقمي الأخير زيادة 1
+      const lastSeqStr = lastItem.barcode.slice(prefix.length);
+      const parsedSeq = parseInt(lastSeqStr, 10);
+      if (!isNaN(parsedSeq)) {
+        sequence = parsedSeq + 1;
+      }
+    }
+
+    let candidateBarcode = `${prefix}${sequence.toString().padStart(5, '0')}`;
+
+    // 2. التحقق من عدم وجود المرشح في قاعدة البيانات (حماية من Race Conditions)
+    let exists = await this.barcodeInventoryModel.exists({ barcode: candidateBarcode });
+    while (exists) {
+      sequence++;
+      candidateBarcode = `${prefix}${sequence.toString().padStart(5, '0')}`;
+      exists = await this.barcodeInventoryModel.exists({ barcode: candidateBarcode });
+    }
+
+    return candidateBarcode;
   }
 
   private updateTagDetailsList(
