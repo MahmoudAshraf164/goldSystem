@@ -73,4 +73,13 @@ export class CreateBarcodeInvoiceDto {
   @IsOptional()
   @IsString()
   phoneNumber?: string;
+
+  // 🟢 إضافة بلد العميل (اختياري)
+  @ApiPropertyOptional({
+    description: 'بلد / جنسية العميل (اختياري)',
+    example: 'مصر',
+  })
+  @IsOptional()
+  @IsString()
+  country?: string;
 }

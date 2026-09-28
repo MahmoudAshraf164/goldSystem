@@ -24,30 +24,27 @@ export class BarcodeInvoiceItem {
   @Prop({ required: true })
   netWeight: number;
 
-  // 🟢 الوزن
   @Prop({ required: true })
   weight: number;
 
   @Prop({ required: true })
-  goldPricePerGram: number; // سعر جرام الذهب وقت البيع
+  goldPricePerGram: number;
 
   @Prop({ required: true })
-  goldTotalPrice: number; // سعر الذهب الصافي = الوزن الصافي × سعر الجرام
+  goldTotalPrice: number;
 
   @Prop({ required: true, default: 0 })
-  makingChargePerGram: number; // مصنعية الجرام
+  makingChargePerGram: number;
 
   @Prop({ required: true, default: 0 })
-  totalMakingCharge: number; // إجمالي المصنعية للقطعة
+  totalMakingCharge: number;
 
   @Prop({ required: true })
-  finalPrice: number; // إجمالي سعر القطعة = الذهب + المصنعية
+  finalPrice: number;
 
-  // 🟢 إجمالي القطعة
   @Prop({ required: true })
   itemTotal: number;
 
-  // 🖼️ إضافة صور القطعة للعرض في الواجهة (للعناصر التي اشتراها الزبون فقط)
   @Prop({ type: [String], default: [] })
   images?: string[];
 }
@@ -60,7 +57,6 @@ export const BarcodeInvoiceItemSchema =
   toJSON: {
     virtuals: true,
     transform: (doc: any, ret: any) => {
-      // 🟢 معالجة وتوحيد بيانات الكاشير لشاشات الطباعة
       if (ret.createdBy) {
         ret.cashier = {
           _id: ret.createdBy._id || ret.createdBy,
@@ -71,11 +67,9 @@ export const BarcodeInvoiceItemSchema =
         ret.cashier = { fullName: 'كاشير غير معرف' };
       }
 
-      // 🟢 حساب totalAmount دائماً وإرجاعه كرقم
       ret.totalAmount =
         typeof ret.finalPaidAmount === 'number' ? ret.finalPaidAmount : 0;
 
-      // 🟢 توحيد حالة الفاتورة
       ret.status = ret.isCancelled ? 'CANCELLED' : 'ACTIVE';
 
       return ret;
@@ -85,31 +79,35 @@ export const BarcodeInvoiceItemSchema =
 })
 export class BarcodeInvoice {
   @Prop({ required: true, unique: true, index: true })
-  invoiceNumber: string; // رقم الفاتورة التلقائي مثل: POS-20260821-0001
+  invoiceNumber: string;
 
   @Prop({ type: [BarcodeInvoiceItemSchema], required: true })
   items: BarcodeInvoiceItem[];
 
   @Prop({ required: true, default: 0 })
-  totalNetWeight: number; // إجمالي الوزن الصافي المباع
+  totalNetWeight: number;
 
   @Prop({ required: true, default: 0 })
-  finalPaidAmount: number; // إجمالي المبلغ المطلوب والمدفوع كاملاً
+  finalPaidAmount: number;
 
   @Prop({ required: true, default: 0 })
-  totalAmount: number; // الإجمالي الكلي للفاتورة
+  totalAmount: number;
 
   @Prop({ type: Types.ObjectId, ref: 'Customer', required: false })
-  customer?: Types.ObjectId; // العميل (اختياري)
+  customer?: Types.ObjectId;
+
+  // 🟢 حفظ بلد العميل المباشر بالفاتورة
+  @Prop({ required: false, default: '' })
+  customerCountry?: string;
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
-  createdBy: Types.ObjectId; // الموظف البائع / الكاشير
+  createdBy: Types.ObjectId;
 
   @Prop({ default: false })
-  isCancelled: boolean; // هل الفاتورة ملغاة
+  isCancelled: boolean;
 
   @Prop({ required: true, enum: ['ACTIVE', 'CANCELLED'], default: 'ACTIVE' })
-  status: string; // حالة الفاتورة
+  status: string;
 }
 
 export const BarcodeInvoiceSchema =
