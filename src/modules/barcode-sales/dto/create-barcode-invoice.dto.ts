@@ -6,6 +6,7 @@ import {
   Min,
   ValidateNested,
   ArrayMinSize,
+  IsNotEmpty,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -49,6 +50,14 @@ export class CreateBarcodeInvoiceDto {
   @Type(() => BarcodeSaleItemDto)
   items: BarcodeSaleItemDto[];
 
+  @ApiProperty({
+    description: 'اسم العميل المباشر (إجباري)',
+    example: 'أحمد محمود',
+  })
+  @IsString({ message: 'اسم العميل يجب أن يكون نصاً' })
+  @IsNotEmpty({ message: 'اسم العميل مطلوب ولا يمكن أن يكون فارغاً' })
+  customerName: string;
+
   @ApiPropertyOptional({
     description: 'معرف العميل (ObjectId) المربوط بالفاتورة (اختياري)',
     example: '60d5ecb8b5c9c22b4c8b9999',
@@ -58,23 +67,13 @@ export class CreateBarcodeInvoiceDto {
   customerId?: string;
 
   @ApiPropertyOptional({
-    description:
-      'اسم العميل المباشر للإنشاء التلقائي (اختياري في حال عدم تحديد customerId)',
-    example: 'أحمد محمود',
-  })
-  @IsOptional()
-  @IsString()
-  customerName?: string;
-
-  @ApiPropertyOptional({
-    description: 'رقم هاتف العميل المباشر (اختياري)',
+    description: 'رقم هاتف العميل (اختياري)',
     example: '01012345678',
   })
   @IsOptional()
   @IsString()
   phoneNumber?: string;
 
-  // 🟢 إضافة بلد العميل (اختياري)
   @ApiPropertyOptional({
     description: 'بلد / جنسية العميل (اختياري)',
     example: 'مصر',

@@ -105,10 +105,11 @@ export class BarcodeSalesService {
 
   private async resolveCustomerId(dto: {
     customerId?: string;
-    customerName?: string;
+    customerName: string;
     phoneNumber?: string;
     country?: string;
-  }): Promise<Types.ObjectId | undefined> {
+  }): Promise<Types.ObjectId> {
+    // 1. إذا تم اختيار العميل بالـ ID من القائمة
     if (dto.customerId && Types.ObjectId.isValid(dto.customerId)) {
       const customer = await this.customersService.findById(dto.customerId);
       if (customer) {
@@ -116,41 +117,47 @@ export class BarcodeSalesService {
       }
     }
 
-    if (dto.customerName && dto.customerName.trim() !== '') {
-      const cleanName = dto.customerName.trim();
-      const cleanPhone = dto.phoneNumber?.trim();
-      const cleanCountry = dto.country?.trim();
+    // 2. معالجة اسم العميل (إجباري)
+    const cleanName = dto.customerName.trim();
+    if (!cleanName) {
+      throw new BadRequestException('اسم العميل مطلوب لإنشاء الفاتورة');
+    }
 
-      if (cleanPhone) {
-        const existingByPhone: any = await this.customersService.findByPhone(cleanPhone);
-        if (existingByPhone?._id) {
-          return existingByPhone._id as Types.ObjectId;
-        }
-      }
+    const cleanPhone = dto.phoneNumber?.trim();
+    const cleanCountry = dto.country?.trim();
 
-      const existingByName: any = await (this.customersService as any).customerModel?.findOne({
-        fullName: cleanName,
-        status: 'ACTIVE',
-      });
-      if (existingByName?._id) {
-        return existingByName._id as Types.ObjectId;
-      }
-
-      try {
-        const newCustomer: any = await this.customersService.create({
-          fullName: cleanName,
-          phoneNumber: cleanPhone,
-          country: cleanCountry,
-        } as any);
-        if (newCustomer?._id) {
-          return newCustomer._id as Types.ObjectId;
-        }
-      } catch (e) {
-        // Ignored
+    // البحث برقم الهاتف أولاً للتحقق من عدم وجوده
+    if (cleanPhone) {
+      const existingByPhone: any =
+        await this.customersService.findByPhone(cleanPhone);
+      if (existingByPhone?._id) {
+        return existingByPhone._id as Types.ObjectId;
       }
     }
 
-    return undefined;
+    // البحث باسم العميل
+    const existingByName: any = await (
+      this.customersService as any
+    ).customerModel?.findOne({
+      fullName: cleanName,
+      status: 'ACTIVE',
+    });
+    if (existingByName?._id) {
+      return existingByName._id as Types.ObjectId;
+    }
+
+    // إنشاء عميل جديد تلقائياً باسم العميل المدخل
+    const newCustomer: any = await this.customersService.create({
+      fullName: cleanName,
+      phoneNumber: cleanPhone,
+      country: cleanCountry,
+    } as any);
+
+    if (newCustomer?._id) {
+      return newCustomer._id as Types.ObjectId;
+    }
+
+    throw new BadRequestException('تعذر إنشاء أو ربط حساب العميل بالفاتورة');
   }
 
   private extractItemImages(item: any): string[] {
@@ -169,8 +176,14 @@ export class BarcodeSalesService {
     if (!rawUrl || typeof rawUrl !== 'string') return [];
 
     let optimizedUrl = rawUrl;
-    if (optimizedUrl.includes('res.cloudinary.com') && !optimizedUrl.includes('q_auto')) {
-      optimizedUrl = optimizedUrl.replace('/upload/', '/upload/f_auto,q_auto,w_300/');
+    if (
+      optimizedUrl.includes('res.cloudinary.com') &&
+      !optimizedUrl.includes('q_auto')
+    ) {
+      optimizedUrl = optimizedUrl.replace(
+        '/upload/',
+        '/upload/f_auto,q_auto,w_300/',
+      );
     }
 
     return [optimizedUrl];
@@ -622,7 +635,7 @@ export class BarcodeSalesService {
       existingInvoice.totalNetWeight = grandTotalNetWeight;
       existingInvoice.finalPaidAmount = grandTotalAmount;
       existingInvoice.totalAmount = grandTotalAmount;
-      existingInvoice.customer = updatedCustomerId ?? existingInvoice.customer;
+      existingInvoice.customer = updatedCustomerId;
       if (dto.country !== undefined) {
         existingInvoice.customerCountry = dto.country.trim();
       }
@@ -657,7 +670,9 @@ export class BarcodeSalesService {
       if (!checkInvoice) {
         throw new NotFoundException('الفاتورة غير موجودة');
       }
-      throw new ConflictException('تم إلغاء الفاتورة بالفعل، أو يتم معالجة طلب إلغاء سابق حالياً');
+      throw new ConflictException(
+        'تم إلغاء الفاتورة بالفعل، أو يتم معالجة طلب إلغاء سابق حالياً',
+      );
     }
 
     const session = await this.connection.startSession();

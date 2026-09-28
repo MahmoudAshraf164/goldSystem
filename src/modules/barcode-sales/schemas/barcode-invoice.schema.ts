@@ -93,10 +93,9 @@ export class BarcodeInvoice {
   @Prop({ required: true, default: 0 })
   totalAmount: number;
 
-  @Prop({ type: Types.ObjectId, ref: 'Customer', required: false })
-  customer?: Types.ObjectId;
+  @Prop({ type: Types.ObjectId, ref: 'Customer', required: true })
+  customer: Types.ObjectId;
 
-  // 🟢 حفظ بلد العميل المباشر بالفاتورة
   @Prop({ required: false, default: '' })
   customerCountry?: string;
 
