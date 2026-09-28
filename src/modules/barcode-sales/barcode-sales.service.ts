@@ -1,85 +1,727 @@
 import {
-  IsArray,
-  IsNumber,
-  IsOptional,
-  IsString,
-  Min,
-  ValidateNested,
-  ArrayMinSize,
-} from 'class-validator';
-import { Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  InternalServerErrorException,
+  ConflictException,
+} from '@nestjs/common';
+import { InjectModel, InjectConnection } from '@nestjs/mongoose';
+import { Model, Types, Connection } from 'mongoose';
+import {
+  BarcodeInvoice,
+  BarcodeInvoiceDocument,
+} from './schemas/barcode-invoice.schema';
+import {
+  BarcodeInventory,
+  BarcodeInventoryDocument,
+} from '../barcode-inventory/schemas/barcode-inventory.schema';
+import {
+  Inventory,
+  InventoryDocument,
+} from '../inventory/schemas/inventory.schema';
+import { CreateBarcodeInvoiceDto } from './dto/create-barcode-invoice.dto';
+import { StockMovementsService } from '../stock-movements/stock-movements.service';
+import { SafeService } from '../safe/safe.service';
+import { CustomersService } from '../customers/customers.service';
 
-export class BarcodeSaleItemDto {
-  @ApiProperty({
-    description: 'رمز الباركود الخاص بالقطعة المراد بيعها',
-    example: '20261001001',
-  })
-  @IsString()
-  barcode: string;
+@Injectable()
+export class BarcodeSalesService {
+  constructor(
+    @InjectModel(BarcodeInvoice.name)
+    private readonly invoiceModel: Model<BarcodeInvoiceDocument>,
+    @InjectModel(BarcodeInventory.name)
+    private readonly barcodeInventoryModel: Model<BarcodeInventoryDocument>,
+    @InjectModel(Inventory.name)
+    private readonly inventoryModel: Model<InventoryDocument>,
+    @InjectConnection() private readonly connection: Connection,
+    private readonly movementsService: StockMovementsService,
+    private readonly safeService: SafeService,
+    private readonly customersService: CustomersService,
+  ) {}
 
-  @ApiProperty({
-    description: 'سعر جرام الذهب المحدد للقطعة وقت عملية البيع',
-    example: 3250.5,
-  })
-  @IsNumber()
-  @Min(1)
-  goldPricePerGram: number;
+  private async generateInvoiceNumber(): Promise<string> {
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const count = await this.invoiceModel.countDocuments().exec();
+    return `POS-${dateStr}-${(count + 1).toString().padStart(4, '0')}`;
+  }
 
-  @ApiPropertyOptional({
-    description:
-      'مصنعية الجرام للقطعة (اختياري: إن لم تُرسل تُحسب المصنعية المسجلة بالقطعة في المخزن)',
-    example: 180.0,
-  })
-  @IsOptional()
-  @IsNumber()
-  @Min(0)
-  makingChargePerGram?: number;
-}
+  private async updateParentInventory(
+    inventoryId: Types.ObjectId | string,
+    grossWeight: number,
+    netWeight: number,
+    tagWeight: number,
+    action: 'DEDUCT' | 'RESTORE',
+    session: any,
+  ) {
+    const parentInventory = await this.inventoryModel
+      .findById(inventoryId)
+      .session(session);
 
-export class CreateBarcodeInvoiceDto {
-  @ApiProperty({
-    description:
-      'قائمة القطع المباعة بالفاتورة (يجب إرسال قطعة واحدة على الأقل)',
-    type: [BarcodeSaleItemDto],
-  })
-  @IsArray()
-  @ArrayMinSize(1)
-  @ValidateNested({ each: true })
-  @Type(() => BarcodeSaleItemDto)
-  items: BarcodeSaleItemDto[];
+    if (!parentInventory) return;
 
-  @ApiPropertyOptional({
-    description: 'معرف العميل (ObjectId) المربوط بالفاتورة (اختياري)',
-    example: '60d5ecb8b5c9c22b4c8b9999',
-  })
-  @IsOptional()
-  @IsString()
-  customerId?: string;
+    const countFactor = action === 'DEDUCT' ? -1 : 1;
 
-  @ApiPropertyOptional({
-    description:
-      'اسم العميل المباشر للإنشاء التلقائي (اختياري في حال عدم تحديد customerId)',
-    example: 'أحمد محمود',
-  })
-  @IsOptional()
-  @IsString()
-  customerName?: string;
+    parentInventory.currentCount = Math.max(
+      0,
+      parentInventory.currentCount + countFactor,
+    );
+    parentInventory.totalGrossWeight = parseFloat(
+      (parentInventory.totalGrossWeight + grossWeight * countFactor).toFixed(3),
+    );
+    parentInventory.totalNetWeight = parseFloat(
+      (parentInventory.totalNetWeight + netWeight * countFactor).toFixed(3),
+    );
 
-  @ApiPropertyOptional({
-    description: 'رقم هاتف العميل المباشر (اختياري)',
-    example: '01012345678',
-  })
-  @IsOptional()
-  @IsString()
-  phoneNumber?: string;
+    if (
+      tagWeight &&
+      tagWeight > 0 &&
+      Array.isArray(parentInventory.tagDetails)
+    ) {
+      const tagIndex = parentInventory.tagDetails.findIndex(
+        (t) => Math.abs(t.weight - tagWeight) < 0.001,
+      );
 
-  // 🟢 إضافة بلد العميل (اختياري)
-  @ApiPropertyOptional({
-    description: 'بلد / جنسية العميل (اختياري)',
-    example: 'مصر',
-  })
-  @IsOptional()
-  @IsString()
-  country?: string;
+      if (action === 'DEDUCT') {
+        if (tagIndex !== -1) {
+          parentInventory.tagDetails[tagIndex].count -= 1;
+          if (parentInventory.tagDetails[tagIndex].count <= 0) {
+            parentInventory.tagDetails.splice(tagIndex, 1);
+          }
+        }
+      } else if (action === 'RESTORE') {
+        if (tagIndex !== -1) {
+          parentInventory.tagDetails[tagIndex].count += 1;
+        } else {
+          parentInventory.tagDetails.push({
+            count: 1,
+            weight: tagWeight,
+          } as any);
+        }
+      }
+    }
+
+    await parentInventory.save({ session });
+  }
+
+  private async resolveCustomerId(dto: {
+    customerId?: string;
+    customerName?: string;
+    phoneNumber?: string;
+    country?: string;
+  }): Promise<Types.ObjectId | undefined> {
+    if (dto.customerId && Types.ObjectId.isValid(dto.customerId)) {
+      const customer = await this.customersService.findById(dto.customerId);
+      if (customer) {
+        return (customer as any)._id as Types.ObjectId;
+      }
+    }
+
+    if (dto.customerName && dto.customerName.trim() !== '') {
+      const cleanName = dto.customerName.trim();
+      const cleanPhone = dto.phoneNumber?.trim();
+      const cleanCountry = dto.country?.trim();
+
+      if (cleanPhone) {
+        const existingByPhone: any = await this.customersService.findByPhone(cleanPhone);
+        if (existingByPhone?._id) {
+          return existingByPhone._id as Types.ObjectId;
+        }
+      }
+
+      const existingByName: any = await (this.customersService as any).customerModel?.findOne({
+        fullName: cleanName,
+        status: 'ACTIVE',
+      });
+      if (existingByName?._id) {
+        return existingByName._id as Types.ObjectId;
+      }
+
+      try {
+        const newCustomer: any = await this.customersService.create({
+          fullName: cleanName,
+          phoneNumber: cleanPhone,
+          country: cleanCountry,
+        } as any);
+        if (newCustomer?._id) {
+          return newCustomer._id as Types.ObjectId;
+        }
+      } catch (e) {
+        // Ignored
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractItemImages(item: any): string[] {
+    const rawItem = item?.toObject ? item.toObject() : item || {};
+    const parentInv = rawItem.inventoryRef || {};
+
+    const rawUrl =
+      rawItem.imageUrl ||
+      rawItem.image ||
+      (Array.isArray(rawItem.images) && rawItem.images[0]) ||
+      parentInv.imageUrl ||
+      parentInv.image ||
+      (Array.isArray(parentInv.images) && parentInv.images[0]) ||
+      null;
+
+    if (!rawUrl || typeof rawUrl !== 'string') return [];
+
+    let optimizedUrl = rawUrl;
+    if (optimizedUrl.includes('res.cloudinary.com') && !optimizedUrl.includes('q_auto')) {
+      optimizedUrl = optimizedUrl.replace('/upload/', '/upload/f_auto,q_auto,w_300/');
+    }
+
+    return [optimizedUrl];
+  }
+
+  // 1. إنشاء فاتورة مبيعات
+  async createInvoice(
+    dto: CreateBarcodeInvoiceDto,
+    userId: string,
+  ): Promise<BarcodeInvoice> {
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      const finalCustomerId = await this.resolveCustomerId(dto);
+
+      const processedItems: Array<{
+        item: Types.ObjectId;
+        barcode: string;
+        title: string;
+        karat: number;
+        netWeight: number;
+        weight: number;
+        goldPricePerGram: number;
+        goldTotalPrice: number;
+        makingChargePerGram: number;
+        totalMakingCharge: number;
+        finalPrice: number;
+        itemTotal: number;
+        images?: string[];
+      }> = [];
+
+      let grandTotalNetWeight = 0;
+      let grandTotalAmount = 0;
+
+      for (const saleItem of dto.items) {
+        const item = await this.barcodeInventoryModel
+          .findOne({ barcode: saleItem.barcode.trim(), isArchived: false })
+          .populate({
+            path: 'inventoryRef',
+            select: 'imageUrl images image',
+          })
+          .session(session)
+          .exec();
+
+        if (!item) {
+          throw new NotFoundException(
+            `القطعة ذات الباركود (${saleItem.barcode}) غير موجودة بالمخزن`,
+          );
+        }
+
+        if (item.status === 'SOLD') {
+          throw new BadRequestException(
+            `القطعة [${item.title}] ذات الباركود (${item.barcode}) مباعة بالفعل!`,
+          );
+        }
+
+        const goldPrice = saleItem.goldPricePerGram;
+        const makingCharge =
+          saleItem.makingChargePerGram ?? item.makingChargePerGram;
+
+        const goldTotalPrice = parseFloat(
+          (item.netWeight * goldPrice).toFixed(2),
+        );
+        const totalMakingCharge = parseFloat(
+          (item.netWeight * makingCharge).toFixed(2),
+        );
+        const finalPrice = parseFloat(
+          (goldTotalPrice + totalMakingCharge).toFixed(2),
+        );
+
+        const itemImages = this.extractItemImages(item);
+
+        processedItems.push({
+          item: item._id as Types.ObjectId,
+          barcode: item.barcode,
+          title: item.title,
+          karat: item.karat,
+          netWeight: item.netWeight,
+          weight: item.netWeight,
+          goldPricePerGram: goldPrice,
+          goldTotalPrice,
+          makingChargePerGram: makingCharge,
+          totalMakingCharge,
+          finalPrice,
+          itemTotal: finalPrice,
+          images: itemImages,
+        });
+
+        grandTotalNetWeight = parseFloat(
+          (grandTotalNetWeight + item.netWeight).toFixed(3),
+        );
+        grandTotalAmount = parseFloat(
+          (grandTotalAmount + finalPrice).toFixed(2),
+        );
+
+        item.status = 'SOLD';
+        await item.save({ session });
+
+        if (item.inventoryRef) {
+          const invRefId =
+            typeof item.inventoryRef === 'object'
+              ? item.inventoryRef._id
+              : item.inventoryRef;
+          const tagWeight =
+            (item as any).tagWeight ?? item.grossWeight - item.netWeight;
+          await this.updateParentInventory(
+            invRefId,
+            item.grossWeight,
+            item.netWeight,
+            tagWeight,
+            'DEDUCT',
+            session,
+          );
+        }
+
+        const logRefId = item.inventoryRef
+          ? typeof item.inventoryRef === 'object'
+            ? item.inventoryRef._id
+            : item.inventoryRef
+          : item._id;
+
+        await this.movementsService.logMovement({
+          inventoryItem: logRefId.toString(),
+          type: 'SALE_OUT',
+          countChange: -1,
+          grossWeightChange: -item.grossWeight,
+          netWeightChange: -item.netWeight,
+          actionBy: userId,
+          reason: `بيع قطعة بالباركود [${item.barcode}] - ${item.title} عبر فاتورة مبيعات`,
+        });
+      }
+
+      const invoiceNumber = await this.generateInvoiceNumber();
+
+      const newInvoice = new this.invoiceModel({
+        invoiceNumber,
+        items: processedItems,
+        totalNetWeight: grandTotalNetWeight,
+        finalPaidAmount: grandTotalAmount,
+        totalAmount: grandTotalAmount,
+        customer: finalCustomerId,
+        customerCountry: dto.country?.trim() || '',
+        createdBy: new Types.ObjectId(userId),
+        status: 'ACTIVE',
+        isCancelled: false,
+      });
+
+      const savedInvoice = await newInvoice.save({ session });
+
+      await this.safeService.triggerTransaction(
+        savedInvoice.finalPaidAmount,
+        'INFLOW',
+        `تحصيل قيمة فاتورة بيع باركود رقم (${savedInvoice.invoiceNumber})`,
+        userId,
+      );
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return this.findInvoiceById(savedInvoice._id.toString());
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
+  }
+
+  // 2. جلب جميع الفواتير
+  async findAllInvoices(): Promise<BarcodeInvoice[]> {
+    const invoices = await this.invoiceModel
+      .find({ isCancelled: false })
+      .populate('createdBy', 'fullName name email')
+      .populate('customer', 'fullName phoneNumber country')
+      .populate({
+        path: 'items.item',
+        select: 'imageUrl images image inventoryRef',
+        populate: {
+          path: 'inventoryRef',
+          select: 'imageUrl images image',
+        },
+      })
+      .sort({ createdAt: -1 })
+      .exec();
+
+    if (!Array.isArray(invoices)) return [];
+
+    return invoices.map((inv) => {
+      const invObj = inv.toObject ? inv.toObject() : inv;
+      invObj.items = invObj.items.map((it: any) => {
+        if (!it.images || it.images.length === 0) {
+          it.images = this.extractItemImages(it.item);
+        } else {
+          it.images = this.extractItemImages({ imageUrl: it.images[0] });
+        }
+        return it;
+      });
+      return invObj;
+    });
+  }
+
+  // 3. جلب تفاصيل فاتورة بالـ ID
+  async findInvoiceById(id: string): Promise<BarcodeInvoice> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('معرف الفاتورة غير صالح');
+    }
+
+    const invoice = await this.invoiceModel
+      .findById(id)
+      .populate('createdBy', 'fullName name email')
+      .populate('customer', 'fullName phoneNumber country')
+      .populate({
+        path: 'items.item',
+        select: 'imageUrl images image inventoryRef',
+        populate: {
+          path: 'inventoryRef',
+          select: 'imageUrl images image',
+        },
+      })
+      .exec();
+
+    if (!invoice) {
+      throw new NotFoundException('فاتورة المبيعات المطلوبة غير موجودة');
+    }
+
+    const invObj = invoice.toObject ? invoice.toObject() : invoice;
+    invObj.items = invObj.items.map((it: any) => {
+      if (!it.images || it.images.length === 0) {
+        it.images = this.extractItemImages(it.item);
+      } else {
+        it.images = this.extractItemImages({ imageUrl: it.images[0] });
+      }
+      return it;
+    });
+
+    return invObj;
+  }
+
+  // 4. تعديل الفاتورة
+  async updateInvoice(
+    id: string,
+    dto: CreateBarcodeInvoiceDto,
+    userId: string,
+  ): Promise<BarcodeInvoice> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('معرف الفاتورة غير صالح');
+    }
+
+    const existingInvoice = await this.invoiceModel.findById(id);
+    if (!existingInvoice) {
+      throw new NotFoundException('الفاتورة غير موجودة');
+    }
+
+    if (existingInvoice.isCancelled) {
+      throw new BadRequestException('لا يمكن تعديل فاتورة ملغاة');
+    }
+
+    const updatedCustomerId = await this.resolveCustomerId(dto);
+
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      const oldItemsMap = new Map(
+        existingInvoice.items.map((i) => [i.barcode, i]),
+      );
+      const newBarcodes = new Set(dto.items.map((i) => i.barcode.trim()));
+
+      for (const [barcode, oldItem] of oldItemsMap.entries()) {
+        if (!newBarcodes.has(barcode)) {
+          const barcodeItem = await this.barcodeInventoryModel
+            .findById(oldItem.item)
+            .session(session);
+
+          if (barcodeItem) {
+            barcodeItem.status = 'AVAILABLE';
+            await barcodeItem.save({ session });
+
+            if (barcodeItem.inventoryRef) {
+              const tagWeight =
+                (barcodeItem as any).tagWeight ??
+                barcodeItem.grossWeight - barcodeItem.netWeight;
+              await this.updateParentInventory(
+                barcodeItem.inventoryRef,
+                barcodeItem.grossWeight,
+                barcodeItem.netWeight,
+                tagWeight,
+                'RESTORE',
+                session,
+              );
+            }
+
+            await this.movementsService.logMovement({
+              inventoryItem: (
+                barcodeItem.inventoryRef || barcodeItem._id
+              ).toString(),
+              type: 'INVOICE_UPDATE_RETURN',
+              countChange: 1,
+              grossWeightChange: barcodeItem.grossWeight,
+              netWeightChange: barcodeItem.netWeight,
+              actionBy: userId,
+              reason: `إعادة القطعة [${barcode}] للمخزون العام والباركود نتيجة تعديل الفاتورة رقم (${existingInvoice.invoiceNumber})`,
+            });
+          }
+        }
+      }
+
+      const processedItems: Array<{
+        item: Types.ObjectId;
+        barcode: string;
+        title: string;
+        karat: number;
+        netWeight: number;
+        weight: number;
+        goldPricePerGram: number;
+        goldTotalPrice: number;
+        makingChargePerGram: number;
+        totalMakingCharge: number;
+        finalPrice: number;
+        itemTotal: number;
+        images?: string[];
+      }> = [];
+
+      let grandTotalNetWeight = 0;
+      let grandTotalAmount = 0;
+
+      for (const saleItem of dto.items) {
+        const trimmedBarcode = saleItem.barcode.trim();
+        const item = await this.barcodeInventoryModel
+          .findOne({ barcode: trimmedBarcode, isArchived: false })
+          .populate({
+            path: 'inventoryRef',
+            select: 'imageUrl images image',
+          })
+          .session(session)
+          .exec();
+
+        if (!item) {
+          throw new NotFoundException(
+            `القطعة ذات الباركود (${trimmedBarcode}) غير موجودة بالمخزن`,
+          );
+        }
+
+        const wasInOldInvoice = oldItemsMap.has(trimmedBarcode);
+        if (!wasInOldInvoice && item.status === 'SOLD') {
+          throw new BadRequestException(
+            `القطعة [${item.title}] ذات الباركود (${item.barcode}) مباعة بالفعل!`,
+          );
+        }
+
+        if (!wasInOldInvoice) {
+          item.status = 'SOLD';
+          await item.save({ session });
+
+          if (item.inventoryRef) {
+            const invRefId =
+              typeof item.inventoryRef === 'object'
+                ? item.inventoryRef._id
+                : item.inventoryRef;
+            const tagWeight =
+              (item as any).tagWeight ?? item.grossWeight - item.netWeight;
+            await this.updateParentInventory(
+              invRefId,
+              item.grossWeight,
+              item.netWeight,
+              tagWeight,
+              'DEDUCT',
+              session,
+            );
+          }
+
+          const logRefId = item.inventoryRef
+            ? typeof item.inventoryRef === 'object'
+              ? item.inventoryRef._id
+              : item.inventoryRef
+            : item._id;
+
+          await this.movementsService.logMovement({
+            inventoryItem: logRefId.toString(),
+            type: 'INVOICE_UPDATE_OUT',
+            countChange: -1,
+            grossWeightChange: -item.grossWeight,
+            netWeightChange: -item.netWeight,
+            actionBy: userId,
+            reason: `خصم قطعة بالباركود [${item.barcode}] من المخزون العام للتعديل على الفاتورة (${existingInvoice.invoiceNumber})`,
+          });
+        }
+
+        const goldPrice = saleItem.goldPricePerGram;
+        const makingCharge =
+          saleItem.makingChargePerGram ?? item.makingChargePerGram;
+
+        const goldTotalPrice = parseFloat(
+          (item.netWeight * goldPrice).toFixed(2),
+        );
+        const totalMakingCharge = parseFloat(
+          (item.netWeight * makingCharge).toFixed(2),
+        );
+        const finalPrice = parseFloat(
+          (goldTotalPrice + totalMakingCharge).toFixed(2),
+        );
+
+        const itemImages = this.extractItemImages(item);
+
+        processedItems.push({
+          item: item._id as Types.ObjectId,
+          barcode: item.barcode,
+          title: item.title,
+          karat: item.karat,
+          netWeight: item.netWeight,
+          weight: item.netWeight,
+          goldPricePerGram: goldPrice,
+          goldTotalPrice,
+          makingChargePerGram: makingCharge,
+          totalMakingCharge,
+          finalPrice,
+          itemTotal: finalPrice,
+          images: itemImages,
+        });
+
+        grandTotalNetWeight = parseFloat(
+          (grandTotalNetWeight + item.netWeight).toFixed(3),
+        );
+        grandTotalAmount = parseFloat(
+          (grandTotalAmount + finalPrice).toFixed(2),
+        );
+      }
+
+      const oldAmount = existingInvoice.finalPaidAmount;
+      const amountDifference = grandTotalAmount - oldAmount;
+
+      if (amountDifference > 0) {
+        await this.safeService.triggerTransaction(
+          amountDifference,
+          'INFLOW',
+          `تحصيل فرق مال لتعديل فاتورة باركود رقم (${existingInvoice.invoiceNumber})`,
+          userId,
+        );
+      } else if (amountDifference < 0) {
+        await this.safeService.triggerTransaction(
+          Math.abs(amountDifference),
+          'OUTFLOW',
+          `إرجاع فرق مال للعميل لتعديل فاتورة باركود رقم (${existingInvoice.invoiceNumber})`,
+          userId,
+        );
+      }
+
+      existingInvoice.items = processedItems as any;
+      existingInvoice.totalNetWeight = grandTotalNetWeight;
+      existingInvoice.finalPaidAmount = grandTotalAmount;
+      existingInvoice.totalAmount = grandTotalAmount;
+      existingInvoice.customer = updatedCustomerId ?? existingInvoice.customer;
+      if (dto.country !== undefined) {
+        existingInvoice.customerCountry = dto.country.trim();
+      }
+
+      await existingInvoice.save({ session });
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return this.findInvoiceById(id);
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
+  }
+
+  // 5. إلغاء الفاتورة
+  async cancelInvoice(id: string, userId: string): Promise<BarcodeInvoice> {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException('معرف الفاتورة غير صالح');
+    }
+
+    const lockedInvoice = await this.invoiceModel.findOneAndUpdate(
+      { _id: id, isCancelled: false },
+      { $set: { isCancelled: true, status: 'CANCELLED' } },
+      { new: true },
+    );
+
+    if (!lockedInvoice) {
+      const checkInvoice = await this.invoiceModel.findById(id);
+      if (!checkInvoice) {
+        throw new NotFoundException('الفاتورة غير موجودة');
+      }
+      throw new ConflictException('تم إلغاء الفاتورة بالفعل، أو يتم معالجة طلب إلغاء سابق حالياً');
+    }
+
+    const session = await this.connection.startSession();
+    session.startTransaction();
+
+    try {
+      for (const itemRef of lockedInvoice.items) {
+        const barcodeItem = await this.barcodeInventoryModel
+          .findById(itemRef.item)
+          .session(session);
+
+        if (barcodeItem) {
+          barcodeItem.status = 'AVAILABLE';
+          await barcodeItem.save({ session });
+
+          if (barcodeItem.inventoryRef) {
+            const tagWeight =
+              (barcodeItem as any).tagWeight ??
+              barcodeItem.grossWeight - barcodeItem.netWeight;
+            await this.updateParentInventory(
+              barcodeItem.inventoryRef,
+              barcodeItem.grossWeight,
+              barcodeItem.netWeight,
+              tagWeight,
+              'RESTORE',
+              session,
+            );
+          }
+
+          await this.movementsService.logMovement({
+            inventoryItem: (
+              barcodeItem.inventoryRef || barcodeItem._id
+            ).toString(),
+            type: 'INVOICE_CANCEL_RETURN',
+            countChange: 1,
+            grossWeightChange: barcodeItem.grossWeight,
+            netWeightChange: barcodeItem.netWeight,
+            actionBy: userId,
+            reason: `إرجاع القطعة [${barcodeItem.barcode}] للمخزون العام نتيجة إلغاء الفاتورة رقم (${lockedInvoice.invoiceNumber})`,
+          });
+        }
+      }
+
+      await this.safeService.triggerTransaction(
+        lockedInvoice.finalPaidAmount,
+        'OUTFLOW',
+        `إلغاء واسترداد فاتورة بيع باركود رقم (${lockedInvoice.invoiceNumber})`,
+        userId,
+      );
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return this.findInvoiceById(id);
+    } catch (error) {
+      await session.abortTransaction();
+      session.endSession();
+
+      await this.invoiceModel.updateOne(
+        { _id: id },
+        { $set: { isCancelled: false, status: 'ACTIVE' } },
+      );
+
+      throw new InternalServerErrorException('حدث خطأ أثناء إلغاء الفاتورة');
+    }
+  }
 }
