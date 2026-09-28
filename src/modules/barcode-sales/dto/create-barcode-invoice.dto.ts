@@ -10,7 +10,6 @@ import {
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-
 export class BarcodeSaleItemDto {
   @ApiProperty({
     description: 'رمز الباركود الخاص بالقطعة المراد بيعها',
@@ -26,6 +25,14 @@ export class BarcodeSaleItemDto {
   @IsNumber()
   @Min(1)
   goldPricePerGram: number;
+
+  @ApiPropertyOptional({
+    description: 'وزن القطعة (يرسله الفرونت إند من الشاشة)',
+    example: 2.37,
+  })
+  @IsOptional()
+  @IsNumber()
+  weight?: number; // 👈 إضافة هذا الحقل تمنع الـ Validation Failed فوراً!
 
   @ApiPropertyOptional({
     description:
