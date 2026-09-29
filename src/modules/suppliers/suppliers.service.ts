@@ -71,30 +71,21 @@ export class SuppliersService {
 
     return updatedSupplier;
   }
-
-  async deleteSupplier(id: string): Promise<{ message: string }> {
-    if (!Types.ObjectId.isValid(id)) {
-      throw new BadRequestException('معرف المورد غير صالح');
-    }
-
-    const supplier = await this.supplierModel.findById(id).exec();
-    if (!supplier) {
-      throw new NotFoundException('المورد غير موجود');
-    }
-
-    const hasTransactions = await this.transactionModel.exists({
-      supplierId: new Types.ObjectId(id),
-    });
-
-    if (hasTransactions) {
-      throw new BadRequestException(
-        'لا يمكن حذف المورد لوجود معاملات مالية سابقة مرتبطة به.',
-      );
-    }
-
-    await this.supplierModel.findByIdAndDelete(id).exec();
-    return { message: 'تم حذف المورد بنجاح' };
+async deleteSupplier(id: string): Promise<{ message: string }> {
+  if (!Types.ObjectId.isValid(id)) {
+    throw new BadRequestException('معرف المورد غير صالح');
   }
+
+  const supplier = await this.supplierModel.findById(id).exec();
+  if (!supplier) {
+    throw new NotFoundException('المورد غير موجود');
+  }
+
+  // تم إزالة فحص وجود المعاملات المالية بالسماح بالحذف المباشر
+  await this.supplierModel.findByIdAndDelete(id).exec();
+
+  return { message: 'تم حذف المورد بنجاح' };
+}
 
   async recordTransaction(
     dto: RecordSupplierTransactionDto,

@@ -55,11 +55,11 @@ export class SuppliersController {
     return this.suppliersService.updateSupplier(id, dto);
   }
 
-  @Delete(':id')
-  @ApiOperation({ summary: 'حذف مورد' })
-  async deleteSupplier(@Param('id') id: string) {
-    return this.suppliersService.deleteSupplier(id);
-  }
+ @Delete(':id')
+@ApiOperation({ summary: 'حذف مورد' })
+async deleteSupplier(@Param('id') id: string) {
+  return this.suppliersService.deleteSupplier(id);
+}
 
   @Post('transaction')
   @ApiOperation({ summary: 'تسجيل حركة/معاملة جديدة مع المورد' })
