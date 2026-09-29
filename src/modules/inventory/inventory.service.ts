@@ -454,12 +454,12 @@ export class InventoryService {
     return updatedItem;
   }
 
-  // 3. جلب كافة مجموعات المخزون مع التصفية
+ // 3. جلب كافة مجموعات المخزون مع التصفية
   async findAll(
     status: string = 'ACTIVE',
     karat?: number,
     companyName?: string,
-  ): Promise<InventoryDocument[]> {
+  ): Promise<any[]> {
     const isArchivedQuery = status.toUpperCase() === 'ARCHIVED';
     const filter: any = { isArchived: isArchivedQuery };
 
@@ -468,19 +468,28 @@ export class InventoryService {
       if (companyName === '-') {
         filter.companyName = '-';
       } else {
-        filter.companyName = { $regex: companyName,$options: 'i' };
+        filter.companyName = { $regex: companyName, $options: 'i' };
       }
     }
 
-    return this.inventoryModel
+    const items = await this.inventoryModel
       .find(filter)
       .populate('category', 'name')
       .sort({ createdAt: -1 })
       .exec();
+
+    // معالجة آمنة لحماية الـ Frontend دون تعارض مع TypeScript
+    return items.map((item) => {
+      const itemObj: any = item.toObject();
+      if (!itemObj.category) {
+        itemObj.category = { _id: null, name: 'غير محدد' };
+      }
+      return itemObj;
+    });
   }
 
   // 4. جلب مجموعة بالـ ID
-  async findById(id: string): Promise<InventoryDocument> {
+  async findById(id: string): Promise<any> {
     const item = await this.inventoryModel
       .findOne({ _id: id, isArchived: false })
       .populate('category', 'name')
@@ -490,9 +499,14 @@ export class InventoryService {
       throw new NotFoundException('المجموعة غير موجودة');
     }
 
-    return item;
-  }
+    const itemObj: any = item.toObject();
+    if (!itemObj.category) {
+      itemObj.category = { _id: null, name: 'غير محدد' };
+    }
 
+    return itemObj;
+  }
+  
   // 5. أرشفة مجموعة مخزون (Soft Delete)
   async softDelete(id: string): Promise<void> {
     const item = await this.inventoryModel
