@@ -335,7 +335,7 @@ export class InventoryService {
     private readonly movementsService: StockMovementsService,
   ) {}
 
-  // 1. إنشاء مجموعة مخزون رئيسية جديدة (تكون فارغة وقابلة للتكويد بناءً عليها)
+  // 1. إنشاء مجموعة مخزون رئيسية جديدة
   async create(
     createInventoryDto: CreateInventoryDto,
     userId: string,
@@ -347,7 +347,6 @@ export class InventoryService {
 
     const categoryObjectId = new Types.ObjectId(createInventoryDto.category);
 
-    // التحقق من عدم وجود مجموعة بنفس الخصائص لتجنب التكرار
     const existing = await this.inventoryModel.findOne({
       title: createInventoryDto.title.trim(),
       category: categoryObjectId,
@@ -368,6 +367,7 @@ export class InventoryService {
       initialCount: 0,
       currentCount: 0,
       initialGrossWeight: 0,
+      initialNetWeight: 0,
       totalGrossWeight: 0,
       totalNetWeight: 0,
       tagDetails: [],
@@ -388,7 +388,7 @@ export class InventoryService {
     return savedItem;
   }
 
-  // 2. تعديل بيانات مجموعة المخزون الأساسية (تغيير العنوان، الشركة، أو الأعداد/الأوزان الأولية)
+  // 2. تعديل بيانات مجموعة المخزون الأساسية
   async update(
     id: string,
     updateInventoryDto: UpdateInventoryDto,
@@ -416,12 +416,10 @@ export class InventoryService {
       updateData.category = new Types.ObjectId(updateInventoryDto.category);
     }
 
-    // تعديل العدد الأولي مباشرة (الطرف الأيسر من النسبة)
     if (updateInventoryDto.initialCount !== undefined) {
       updateData.initialCount = updateInventoryDto.initialCount;
     }
 
-    // تعديل الوزن القائم الأولي
     if (updateInventoryDto.initialGrossWeight !== undefined) {
       updateData.initialGrossWeight = updateInventoryDto.initialGrossWeight;
     }
@@ -435,7 +433,6 @@ export class InventoryService {
       throw new NotFoundException('مجموعة الذهب المطلوبة غير موجودة أو مؤرشفة');
     }
 
-    // تسجيل اللوج للتعديلات الابتدائية دون مساس برصيد المبيعات والقطع الحالية
     if (
       updateInventoryDto.initialCount !== undefined ||
       updateInventoryDto.initialGrossWeight !== undefined
@@ -454,7 +451,7 @@ export class InventoryService {
     return updatedItem;
   }
 
- // 3. جلب كافة مجموعات المخزون مع التصفية
+  // 3. جلب كافة مجموعات المخزون مع التصفية
   async findAll(
     status: string = 'ACTIVE',
     karat?: number,
@@ -468,7 +465,7 @@ export class InventoryService {
       if (companyName === '-') {
         filter.companyName = '-';
       } else {
-        filter.companyName = { $regex: companyName, $options: 'i' };
+        filter.companyName = { $regex: companyName,$options: 'i' };
       }
     }
 
@@ -478,7 +475,6 @@ export class InventoryService {
       .sort({ createdAt: -1 })
       .exec();
 
-    // معالجة آمنة لحماية الـ Frontend دون تعارض مع TypeScript
     return items.map((item) => {
       const itemObj: any = item.toObject();
       if (!itemObj.category) {
@@ -506,7 +502,7 @@ export class InventoryService {
 
     return itemObj;
   }
-  
+
   // 5. أرشفة مجموعة مخزون (Soft Delete)
   async softDelete(id: string): Promise<void> {
     const item = await this.inventoryModel

@@ -104,6 +104,10 @@ export class Inventory extends Document {
   @Prop({ type: Number, required: true, default: 0, min: 0 })
   initialGrossWeight: number;
 
+  // 👈 الإضافة المهمة: حقل الوزن الصافي الابتدائي
+  @Prop({ type: Number, required: true, default: 0, min: 0 })
+  initialNetWeight: number;
+
   @Prop({ type: Number, required: true, default: 0, min: 0 })
   totalGrossWeight: number;
 
