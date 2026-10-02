@@ -10,6 +10,7 @@ import {
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+
 export class BarcodeSaleItemDto {
   @ApiProperty({
     description: 'رمز الباركود الخاص بالقطعة المراد بيعها',
@@ -24,6 +25,9 @@ export class BarcodeSaleItemDto {
   })
   @IsNumber()
   @Min(1)
+  @Transform(({ value }) =>
+    typeof value === 'number' ? Number(value.toFixed(2)) : value,
+  )
   goldPricePerGram: number;
 
   @ApiPropertyOptional({
@@ -32,17 +36,31 @@ export class BarcodeSaleItemDto {
   })
   @IsOptional()
   @IsNumber()
-  weight?: number; // 👈 إضافة هذا الحقل تمنع الـ Validation Failed فوراً!
+  weight?: number;
 
   @ApiPropertyOptional({
-    description:
-      'مصنعية الجرام للقطعة (اختياري: إن لم تُرسل تُحسب المصنعية المسجلة بالقطعة في المخزن)',
+    description: 'مصنعية الجرام للقطعة (تُقرّب تلقائياً لأقرب خانتين عشريتين)',
     example: 180.0,
   })
   @IsOptional()
   @IsNumber()
   @Min(0)
+  @Transform(({ value }) =>
+    typeof value === 'number' ? Number(value.toFixed(2)) : value,
+  )
   makingChargePerGram?: number;
+
+  @ApiPropertyOptional({
+    description: 'إجمالي سعر القطعة النهائي بعد التعديل اليدوي (اختياري)',
+    example: 76400.0,
+  })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Transform(({ value }) =>
+    typeof value === 'number' ? Number(value.toFixed(2)) : value,
+  )
+  finalPrice?: number;
 }
 
 export class CreateBarcodeInvoiceDto {
@@ -81,7 +99,13 @@ export class CreateBarcodeInvoiceDto {
   })
   @IsOptional()
   @IsString()
-  @Transform(({ value }) => (value === '' || value === null ? undefined : typeof value === 'string' ? value.trim() : value))
+  @Transform(({ value }) =>
+    value === '' || value === null
+      ? undefined
+      : typeof value === 'string'
+        ? value.trim()
+        : value,
+  )
   phoneNumber?: string;
 
   @ApiPropertyOptional({
@@ -90,6 +114,12 @@ export class CreateBarcodeInvoiceDto {
   })
   @IsOptional()
   @IsString()
-  @Transform(({ value }) => (value === '' || value === null ? undefined : typeof value === 'string' ? value.trim() : value))
+  @Transform(({ value }) =>
+    value === '' || value === null
+      ? undefined
+      : typeof value === 'string'
+        ? value.trim()
+        : value,
+  )
   country?: string;
 }
