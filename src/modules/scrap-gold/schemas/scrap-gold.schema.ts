@@ -6,7 +6,7 @@ export class ScrapGold extends Document {
   @Prop({
     type: Number,
     required: true,
-    enum: [18, 21, 24], // 👈 إضافة عيار 24 لدعم الذهب المسبوك النقي
+    enum: [18, 21, 24],
     unique: true,
     index: true,
   })

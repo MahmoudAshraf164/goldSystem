@@ -80,7 +80,6 @@ export class ScrapPurchasesService {
         return savedPurchase;
       } catch (err: unknown) {
         const error = err as { code?: number };
-        // إذا حدث تكرار بسبب الضغط المتزامن، أعد المحاولة تلقائياً برقم جديد
         if (error.code === 11000 && attempt < maxRetries - 1) {
           attempt++;
           continue;
@@ -107,24 +106,21 @@ export class ScrapPurchasesService {
   ): Promise<ScrapPurchase[]> {
     const filter: any = {};
 
-    // 1. بحث عام وشامل بحقل search (يبحث في الاسم، رقم الهاتف، ورقم الفاتورة)
     if (search && search.trim() !== '') {
       const cleanSearch = search.trim();
       filter.$or = [
-        { customerName: { $regex: cleanSearch,$options: 'i' } },
-        { customerPhone: { $regex: cleanSearch,$options: 'i' } },
-        { purchaseNumber: { $regex: cleanSearch,$options: 'i' } },
+        { customerName: { $regex: cleanSearch, $options: 'i' } },
+        { customerPhone: { $regex: cleanSearch, $options: 'i' } },
+        { purchaseNumber: { $regex: cleanSearch, $options: 'i' } },
       ];
     }
 
-    // 2. بحث مخصص ومباشر بحقل اسم الزبون
     if (customerName && customerName.trim() !== '') {
-      filter.customerName = { $regex: customerName.trim(),$options: 'i' };
+      filter.customerName = { $regex: customerName.trim(), $options: 'i' };
     }
 
-    // 3. بحث مخصص ومباشر بحقل رقم هاتف الزبون
     if (customerPhone && customerPhone.trim() !== '') {
-      filter.customerPhone = { $regex: customerPhone.trim(),$options: 'i' };
+      filter.customerPhone = { $regex: customerPhone.trim(), $options: 'i' };
     }
 
     return this.scrapPurchaseModel
@@ -148,7 +144,7 @@ export class ScrapPurchasesService {
     return purchase;
   }
 
-  // 4. 🛠️ تعديل عملية شراء كسر وتسوية الخزنة والمخزن أوتوماتيكياً
+  // 4. تعديل عملية شراء كسر وتسوية الخزنة والمخزن أوتوماتيكياً
   async updatePurchase(
     id: string,
     dto: UpdateScrapPurchaseDto,
@@ -178,9 +174,12 @@ export class ScrapPurchasesService {
       );
     } else if (priceDiff < 0) {
       const refund = Math.abs(priceDiff);
+      
       await this.safeService.triggerTransaction(
         refund,
         'INFLOW',
+
+        
         `تعديل فاتورة كسر ${existing.purchaseNumber} للزبون ${customerName} (تخفيض السعر) - إرجاع ${refund}ج.م`,
         userId,
       );
@@ -209,7 +208,7 @@ export class ScrapPurchasesService {
     return existing.save();
   }
 
-  // 5. 🛠️ حذف عملية شراء كسر وإرجاع الكاش ورد الوزن من المخزن
+  // 5. حذف عملية شراء كسر وإرجاع الكاش ورد الوزن من المخزن
   async deletePurchase(
     id: string,
     userId: string,

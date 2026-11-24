@@ -12,8 +12,8 @@ export class ScrapPurchase extends Document {
   @Prop({ type: String, default: null })
   customerPhone: string; // رقم هاتف الزبون (اختياري)
 
-  @Prop({ type: Number, required: true, enum: [18, 21] })
-  karat: number; // عيار 18 أو 21
+  @Prop({ type: Number, required: true, enum: [18, 21, 24] })
+  karat: number; // عيار 18 أو 21 أو 24
 
   @Prop({ type: Number, required: true, min: 0.001 })
   weight: number; // الوزن بالجرام

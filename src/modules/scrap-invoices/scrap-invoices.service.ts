@@ -13,7 +13,7 @@ import { ScrapGold } from '../scrap-gold/schemas/scrap-gold.schema';
 import { Customer } from '../customers/schemas/customer.schema';
 import { StockMovementsService } from '../stock-movements/stock-movements.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-import { SafeService } from '../safe/safe.service'; // 👈 استيراد خدمة الخزنة
+import { SafeService } from '../safe/safe.service';
 
 @Injectable()
 export class ScrapInvoicesService {
@@ -24,7 +24,7 @@ export class ScrapInvoicesService {
     @InjectModel(ScrapGold.name) private readonly scrapModel: Model<ScrapGold>,
     private readonly movementsService: StockMovementsService,
     private readonly eventEmitter: EventEmitter2,
-    private readonly safeService: SafeService, // 👈 حقن الخزنة
+    private readonly safeService: SafeService,
   ) {}
 
   // ─── 1. إصدار فاتورة بيع كسر جديدة وتوريد الكاش للخزنة ───
@@ -140,7 +140,6 @@ export class ScrapInvoicesService {
       );
     }
 
-    // 💰 حفظ السعر القديم للمقارنة
     const oldPrice = oldInvoice.totalPrice;
 
     const targetKarat = dto.karat !== undefined ? dto.karat : oldInvoice.karat;
@@ -243,7 +242,6 @@ export class ScrapInvoicesService {
 
     const updatedInvoice = await oldInvoice.save();
 
-    // 💰 [الخزنة] حساب الفروقات وتعديل الكاش
     const newPrice = updatedInvoice.totalPrice;
     const diff = Number((newPrice - oldPrice).toFixed(2));
 
@@ -292,7 +290,6 @@ export class ScrapInvoicesService {
       );
     }
 
-    // 💰 حفظ القيمة المادية لسحبها من الخزينة
     const priceToRefund = invoice.totalPrice;
 
     const scrapRecord = await this.scrapModel
@@ -319,7 +316,6 @@ export class ScrapInvoicesService {
     invoice.totalPrice = 0;
     const cancelledInvoice = await invoice.save();
 
-    // 💰 [الخزنة] سحب كاش الفاتورة بالكامل من الدرج وارتجاعه للعميل
     if (priceToRefund > 0) {
       await this.safeService.triggerTransaction(
         priceToRefund,
@@ -347,13 +343,11 @@ export class ScrapInvoicesService {
     userRole: string,
   ): Promise<ScrapInvoice[]> {
     const filter: any = {};
-    const normalizedRole = userRole ? userRole.toUpperCase() : '';
 
     if (query.status) filter.status = query.status.toUpperCase();
     if (query.invoiceNumber)
       filter.invoiceNumber = { $regex: query.invoiceNumber, $options: 'i' };
 
-    // 🔍 البحث بالعميل
     if (query.customerName || query.customerPhone) {
       const customerFilter: any = {};
       if (query.customerName) {
@@ -373,11 +367,6 @@ export class ScrapInvoicesService {
       const customerIds = matchedCustomers.map((c) => c._id);
       filter.customer = { $in: customerIds };
     }
-
-    // ⛔ تم إيقاف شرط الفلترة أدناه لتظهر جميع فواتير الكسر لكافة الموظفين والمستخدمين
-    // if (normalizedRole !== 'OWNER') {
-    //   filter.actionBy = new Types.ObjectId(userId);
-    // }
 
     return this.scrapInvoiceModel
       .find(filter)

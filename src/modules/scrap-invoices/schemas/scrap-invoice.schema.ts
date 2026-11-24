@@ -9,7 +9,7 @@ export class ScrapInvoice extends Document {
   @Prop({ type: Types.ObjectId, ref: 'Customer', required: true, index: true })
   customer: Types.ObjectId;
 
-  @Prop({ type: Number, required: true, enum: [18, 21], index: true })
+  @Prop({ type: Number, required: true, enum: [18, 21, 24], index: true })
   karat: number;
 
   @Prop({ type: Number, required: true, min: 0.001 })

@@ -17,9 +17,9 @@ export class CreateScrapInvoiceDto {
   @IsNotEmpty()
   customer: string;
 
-  @ApiProperty({ example: 21, enum: [18, 21] })
+  @ApiProperty({ example: 21, enum: [18, 21, 24] })
   @IsNumber()
-  @IsIn([18, 21], { message: 'العيار يجب أن يكون 18 أو 21' })
+  @IsIn([18, 21, 24], { message: 'العيار يجب أن يكون 18 أو 21 أو 24' })
   karat: number;
 
   @ApiProperty({
@@ -48,5 +48,5 @@ export class CreateScrapInvoiceDto {
   @IsOptional()
   @IsNumber()
   @Min(0)
-  totalPrice?: number; // 👈 تم إضافته كحقل اختياري
+  totalPrice?: number;
 }

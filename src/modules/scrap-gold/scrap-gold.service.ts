@@ -13,17 +13,21 @@ export class ScrapGoldService {
     private readonly movementsService: StockMovementsService,
   ) {}
 
-  // 1. جلب رصيد أوزان الكسر
+  // 1. جلب رصيد أوزان الكسر وضمان تهيئة العيارات الثلاثة (18، 21، 24)
   async getInventory(): Promise<ScrapGold[]> {
-    const counts = await this.scrapModel.countDocuments();
-    if (counts === 0) {
-      await this.scrapModel.insertMany([
-        { karat: 18, totalWeight: 0 },
-        { karat: 21, totalWeight: 0 },
-        { karat: 24, totalWeight: 0 },
-      ]);
+    const requiredKarats = [18, 21, 24];
+    const existingRecords = await this.scrapModel.find().exec();
+    const existingKarats = new Set(existingRecords.map((r) => r.karat));
+
+    const missingKarats = requiredKarats
+      .filter((k) => !existingKarats.has(k))
+      .map((karat) => ({ karat, totalWeight: 0 }));
+
+    if (missingKarats.length > 0) {
+      await this.scrapModel.insertMany(missingKarats);
     }
-    return this.scrapModel.find().exec();
+
+    return this.scrapModel.find().sort({ karat: 1 }).exec();
   }
 
   // 2. شراء / إضافة وزن كسر (تراكمي)
@@ -41,18 +45,18 @@ export class ScrapGoldService {
 
     await this.movementsService.logMovement({
       inventoryItem: updated._id.toString(),
-      type: 'INVENTORY_IN' as any, // 👈 التوافق مع نوع حركة المخزون
+      type: 'INVENTORY_IN' as any,
       countChange: 0,
-      grossWeightChange: weight,
-      netWeightChange: weight,
+      grossWeightChange: roundedWeight,
+      netWeightChange: roundedWeight,
       actionBy: userId,
-      reason: `إضافة/شراء ذهب كسر عيار ${karat} بوزن ${weight} جرام`,
+      reason: `إضافة/شراء ذهب كسر عيار ${karat} بوزن ${roundedWeight} جرام`,
     });
 
     return updated;
   }
 
-  // 3. 🛠️ خصم وزن كسر للمخزن (تُستخدم عند التسييح)
+  // 3. خصم وزن كسر للمخزن (تُستخدم عند التسييح أو المبيعات)
   async deductScrap(
     karat: number,
     weight: number,
@@ -78,14 +82,13 @@ export class ScrapGoldService {
       )
       .exec();
 
-    // 👈 معالجة خطأ 'updated is possibly null'
     if (!updated) {
       throw new BadRequestException(`فشلت عملية تحديث السجل لعيار ${karat}`);
     }
 
     await this.movementsService.logMovement({
       inventoryItem: updated._id.toString(),
-      type: 'INVENTORY_OUT' as any, // 👈 تجنب تعارض الأنواع
+      type: 'INVENTORY_OUT' as any,
       countChange: 0,
       grossWeightChange: -roundedWeight,
       netWeightChange: -roundedWeight,

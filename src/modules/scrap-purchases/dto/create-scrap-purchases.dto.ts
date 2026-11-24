@@ -1,5 +1,12 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsEnum, IsNumber, IsOptional, IsString, IsNotEmpty, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsNotEmpty,
+  Min,
+} from 'class-validator';
 
 export class CreateScrapPurchaseDto {
   @ApiProperty({
@@ -21,11 +28,11 @@ export class CreateScrapPurchaseDto {
 
   @ApiProperty({
     example: 21,
-    enum: [18, 21],
-    description: 'العيار (18 أو 21)',
+    enum: [18, 21, 24],
+    description: 'العيار (18 أو 21 أو 24)',
   })
   @IsNumber()
-  @IsEnum([18, 21], { message: 'العيار يجب أن يكون 18 أو 21 فقط' })
+  @IsEnum([18, 21, 24], { message: 'العيار يجب أن يكون 18 أو 21 أو 24 فقط' })
   karat: number;
 
   @ApiProperty({ example: 5.0, description: 'الوزن المشتري بالجرام' })

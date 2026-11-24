@@ -29,7 +29,7 @@ export class ScrapGoldController {
   @HttpCode(HttpStatus.OK)
   @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
-    summary: 'عرض إجمالي أوزان الذهب الكسر في الخزنة لكل عيار (18 و 21)',
+    summary: 'عرض إجمالي أوزان الذهب الكسر في الخزنة لكل عيار (18 و 21 و 24)',
   })
   async getBalance() {
     const balance = await this.scrapGoldService.getInventory();
@@ -43,10 +43,10 @@ export class ScrapGoldController {
   @HttpCode(HttpStatus.OK)
   @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
-    summary: 'إضافة وزن ذهب كسر للمخزن دون فاتورة (18 و 21)',
+    summary: 'إضافة وزن ذهب كسر للمخزن دون فاتورة (18 و 21 و 24)',
   })
   async buyScrap(@Body() buyScrapDto: BuyScrapDto, @Req() req: any) {
-    const userId = req.user.id;
+    const userId = req.user.userId || req.user.id;
     const updated = await this.scrapGoldService.buyScrap(buyScrapDto, userId);
     return {
       message: 'تم إضافة وزن الكسر للخزنة وتحديث السجل بنجاح',
@@ -58,13 +58,13 @@ export class ScrapGoldController {
   @HttpCode(HttpStatus.OK)
   @Roles(Role.OWNER, Role.Employee)
   @ApiOperation({
-    summary: 'تعديل وتصفية رصيد الكسر المباشر لعيار 18 أو 21 (تسوية جرد)',
+    summary: 'تعديل وتصفية رصيد الكسر المباشر لعيار 18 أو 21 أو 24 (تسوية جرد)',
   })
   async updateScrapBalance(
     @Body() updateScrapDto: UpdateScrapDto,
     @Req() req: any,
   ) {
-    const userId = req.user.id;
+    const userId = req.user.userId || req.user.id;
     const updated = await this.scrapGoldService.updateScrapBalance(
       updateScrapDto,
       userId,
